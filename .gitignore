@@ -10,3 +10,4 @@ build/
 *.npz
 *.pt
 *.pth
+examples/
