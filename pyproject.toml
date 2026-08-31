@@ -3,13 +3,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gto-format-converter"
+name = "topology-format-converter"
 version = "0.1.0"
 description = "Format conversion utilities for SELTO topology optimization data, voxel volumes, SDF caches, and meshes."
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [
-  { name = "GenerativeTopologyOptimization contributors" }
+  { name = "Topology Format Converter contributors" }
 ]
 dependencies = [
   "numpy",
@@ -24,8 +24,8 @@ meshio = ["meshio"]
 selto = ["torch"]
 
 [project.scripts]
-gto-convert = "gto_format_converter.cli:main"
+topology-convert = "topology_format_converter.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["gto_format_converter*"]
+include = ["topology_format_converter*"]

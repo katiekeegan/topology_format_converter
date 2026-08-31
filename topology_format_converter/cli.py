@@ -170,7 +170,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="gto-convert", description="Convert topology optimization volumes, SELTO samples, SDF caches, and meshes.")
+    parser = argparse.ArgumentParser(prog="topology-convert", description="Convert topology optimization volumes, SELTO samples, SDF caches, and meshes.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     selto_mesh = subparsers.add_parser("selto-to-mesh", help="Export one SELTO sample as OBJ/STL/PLY/etc.")

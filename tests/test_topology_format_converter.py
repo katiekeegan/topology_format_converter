@@ -1,6 +1,6 @@
 import numpy as np
 
-from gto_format_converter import (
+from topology_format_converter import (
     density_to_mesh,
     density_to_training_cache,
     load_training_cache,
