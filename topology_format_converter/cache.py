@@ -8,7 +8,7 @@ from typing import Any, Iterable, Optional
 import numpy as np
 import trimesh
 
-from .mesh import density_to_mesh
+from .mesh import density_to_mesh, mesh_summary
 from .metadata import ConversionMetadata, write_metadata
 from .volume import (
     as_3d_array,
@@ -201,3 +201,47 @@ def load_training_cache(path: str | Path) -> TrainingCache:
             query_sdf=data["query_sdf"].astype(np.float32, copy=False),
             metadata=metadata,
         )
+
+
+def cache_to_mesh(
+    cache: TrainingCache,
+    *,
+    threshold: Optional[float] = None,
+    coordinate_mode: Optional[str] = None,
+    spacing: Optional[Iterable[float]] = None,
+    repair: bool = True,
+):
+    threshold_value = threshold if threshold is not None else cache.metadata.threshold
+    if threshold_value is None:
+        threshold_value = 0.5
+    coordinate_mode_value = coordinate_mode or cache.metadata.coordinate_mode or "training"
+    spacing_value = spacing if spacing is not None else cache.metadata.spacing
+    return density_to_mesh(
+        cache.density,
+        threshold=threshold_value,
+        coordinate_mode=coordinate_mode_value,
+        spacing=spacing_value,
+        repair=repair,
+    )
+
+
+def cache_summary(cache: TrainingCache) -> dict[str, Any]:
+    mesh = None
+    try:
+        mesh = mesh_summary(cache_to_mesh(cache))
+    except Exception as exc:
+        mesh = {"error": str(exc)}
+    return {
+        "density_shape": tuple(int(value) for value in cache.density.shape),
+        "sdf_grid_shape": tuple(int(value) for value in cache.sdf_grid.shape),
+        "surface_points_shape": tuple(int(value) for value in cache.surface_points.shape),
+        "surface_normals_shape": tuple(int(value) for value in cache.surface_normals.shape),
+        "query_points_shape": tuple(int(value) for value in cache.query_points.shape),
+        "query_sdf_shape": tuple(int(value) for value in cache.query_sdf.shape),
+        "density_min": float(np.min(cache.density)),
+        "density_max": float(np.max(cache.density)),
+        "sdf_min": float(np.min(cache.sdf_grid)),
+        "sdf_max": float(np.max(cache.sdf_grid)),
+        "metadata": cache.metadata.to_dict(),
+        "mesh": mesh,
+    }

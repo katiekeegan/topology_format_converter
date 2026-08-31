@@ -6,6 +6,8 @@ from typing import Any, Iterable, Optional
 import numpy as np
 from scipy.ndimage import distance_transform_edt, map_coordinates
 
+from .metadata import ConversionMetadata, metadata_sidecar_path, write_metadata
+
 
 VALID_COORDINATE_MODES = ("voxel", "unit-box", "training")
 
@@ -125,6 +127,50 @@ def save_volume_npz(path: str | Path, volume: Any, *, key: str = "density") -> P
     return path
 
 
+def save_volume(
+    path: str | Path,
+    volume: Any,
+    *,
+    key: str = "density",
+    metadata: Optional[ConversionMetadata | dict[str, Any]] = None,
+    write_sidecar: bool = True,
+) -> Path:
+    """Save a 3-D volume as .npy or .npz."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    array = as_3d_array(volume, name=key)
+    suffix = path.suffix.lower()
+    if suffix == ".npy":
+        np.save(path, array)
+    elif suffix == ".npz":
+        np.savez_compressed(path, **{key: array})
+    else:
+        raise ValueError(f"Unsupported volume output extension {suffix!r}. Use .npy or .npz.")
+    if metadata is not None and write_sidecar:
+        write_metadata(metadata, metadata_sidecar_path(path))
+    return path
+
+
+def save_volume_arrays_npz(
+    path: str | Path,
+    arrays: dict[str, Any],
+    *,
+    metadata: Optional[ConversionMetadata | dict[str, Any]] = None,
+    write_sidecar: bool = True,
+) -> Path:
+    """Save multiple arrays in one compressed .npz archive."""
+
+    path = Path(path)
+    if path.suffix.lower() != ".npz":
+        raise ValueError("Multiple arrays can only be saved to .npz.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, **{key: np.asarray(to_numpy(value)) for key, value in arrays.items()})
+    if metadata is not None and write_sidecar:
+        write_metadata(metadata, metadata_sidecar_path(path))
+    return path
+
+
 def threshold_density(density: Any, threshold: float = 0.5) -> np.ndarray:
     return as_3d_array(density, name="density") >= float(threshold)
 
@@ -145,6 +191,61 @@ def signed_distance_from_density(
     outside = distance_transform_edt(~mask, sampling=sampling)
     inside = distance_transform_edt(mask, sampling=sampling)
     return (outside - inside).astype(np.float32, copy=False)
+
+
+def save_signed_distance(
+    path: str | Path,
+    density: Any,
+    *,
+    threshold: float = 0.5,
+    spacing: Optional[Iterable[float]] = None,
+    normalize: bool = False,
+    metadata: Optional[ConversionMetadata | dict[str, Any]] = None,
+    write_sidecar: bool = True,
+) -> Path:
+    density_array = as_3d_array(density, name="density")
+    sdf = signed_distance_from_density(density_array, threshold=threshold, spacing=spacing)
+    if normalize:
+        scale = sdf_normalization_scale(density_array.shape, spacing=spacing)
+        if scale > 0:
+            sdf = sdf / scale
+    return save_volume(path, sdf, key="sdf", metadata=metadata, write_sidecar=write_sidecar)
+
+
+def save_volume_vtk(
+    path: str | Path,
+    volume: Any,
+    *,
+    scalar_name: str = "density",
+    spacing: Optional[Iterable[float]] = None,
+    origin: Iterable[float] = (0.0, 0.0, 0.0),
+) -> Path:
+    """Write a legacy ASCII VTK structured-points file for ParaView."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    array = as_3d_array(volume, name=scalar_name)
+    spacing_values = parse_spacing(spacing) or (1.0, 1.0, 1.0)
+    origin_values = tuple(float(value) for value in origin)
+    if len(origin_values) != 3:
+        raise ValueError("origin must contain exactly 3 values.")
+
+    values = array.astype(np.float32, copy=False).ravel(order="F")
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write("# vtk DataFile Version 3.0\n")
+        handle.write("Topology volume\n")
+        handle.write("ASCII\n")
+        handle.write("DATASET STRUCTURED_POINTS\n")
+        handle.write(f"DIMENSIONS {array.shape[0]} {array.shape[1]} {array.shape[2]}\n")
+        handle.write(f"ORIGIN {origin_values[0]} {origin_values[1]} {origin_values[2]}\n")
+        handle.write(f"SPACING {spacing_values[0]} {spacing_values[1]} {spacing_values[2]}\n")
+        handle.write(f"POINT_DATA {array.size}\n")
+        handle.write(f"SCALARS {scalar_name} float 1\n")
+        handle.write("LOOKUP_TABLE default\n")
+        for start in range(0, len(values), 9):
+            handle.write(" ".join(f"{value:.9g}" for value in values[start:start + 9]))
+            handle.write("\n")
+    return path
 
 
 def sdf_normalization_scale(shape: Iterable[int], spacing: Optional[Iterable[float]] = None) -> float:

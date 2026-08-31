@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "topology-format-converter"
 version = "0.1.0"
-description = "Format conversion utilities for SELTO topology optimization data, voxel volumes, SDF caches, and meshes."
+description = "Format conversion utilities for topology optimization volumes, SDF grids, caches, point clouds, and meshes."
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [
@@ -20,7 +20,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
-meshio = ["meshio"]
 selto = ["torch"]
 
 [project.scripts]
