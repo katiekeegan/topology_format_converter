@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Iterable, Literal, Optional
+import warnings
 
 import numpy as np
 
@@ -31,6 +32,11 @@ Modality = Literal[
 
 MESH_EXTENSIONS = {".obj", ".stl", ".ply", ".off", ".glb", ".gltf"}
 ARRAY_EXTENSIONS = {".npy", ".npz", ".pt", ".pth"}
+UNSIGNED_DISTANCE_WARNING = (
+    "Converting a mesh or surface point cloud to sdf-grid writes an unsigned "
+    "nearest-surface distance grid because the source does not encode reliable "
+    "inside/outside sign information."
+)
 
 
 def infer_modality(path: str | Path, *, input_key: Optional[str] = None) -> Modality:
@@ -86,6 +92,13 @@ def _shape_from_resolution(resolution: int | Iterable[int]) -> tuple[int, int, i
     if len(values) != 3 or any(value <= 0 for value in values):
         raise ValueError(f"resolution must be a positive int or three positive ints; got {values}.")
     return values
+
+
+def _mark_unsigned_distance(metadata: ConversionMetadata) -> None:
+    warnings.warn(UNSIGNED_DISTANCE_WARNING, UserWarning, stacklevel=3)
+    metadata.sdf_sign = "unsigned"
+    metadata.extra["distance_kind"] = "unsigned_nearest_surface"
+    metadata.extra["warning"] = UNSIGNED_DISTANCE_WARNING
 
 
 def convert_file(
@@ -210,6 +223,7 @@ def convert_file(
         if target in {"occupancy", "volume", "sdf-grid"}:
             points, _ = mesh_to_pointcloud(mesh, num_points=num_points, seed=seed)
             if target == "sdf-grid":
+                _mark_unsigned_distance(metadata)
                 distance = pointcloud_to_distance_grid(
                     points,
                     shape=shape,
@@ -240,6 +254,7 @@ def convert_file(
             )
             return save_volume(output_path, occupancy, key="occupancy", metadata=metadata, write_sidecar=write_sidecar)
         if target == "sdf-grid":
+            _mark_unsigned_distance(metadata)
             distance = pointcloud_to_distance_grid(
                 points,
                 shape=shape,

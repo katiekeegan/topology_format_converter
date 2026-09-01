@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from topology_format_converter import (
     cache_to_mesh,
@@ -187,18 +188,19 @@ def test_general_convert_file_volume_to_mesh_and_pointcloud_to_sdf(tmp_path):
     assert points.shape == (24, 3)
     assert normals is not None
 
-    result = cli_main([
-        "convert-file",
-        str(points_path),
-        "--out",
-        str(sdf_path),
-        "--source-modality",
-        "pointcloud",
-        "--target-modality",
-        "sdf-grid",
-        "--resolution",
-        "6",
-    ])
+    with pytest.warns(UserWarning, match="unsigned nearest-surface distance grid"):
+        result = cli_main([
+            "convert-file",
+            str(points_path),
+            "--out",
+            str(sdf_path),
+            "--source-modality",
+            "pointcloud",
+            "--target-modality",
+            "sdf-grid",
+            "--resolution",
+            "6",
+        ])
     assert result == 0
     distance = load_volume(sdf_path, key="sdf")
     assert distance.shape == (6, 6, 6)
@@ -227,3 +229,22 @@ def test_general_convert_file_mesh_to_surface_occupancy(tmp_path):
     assert occupancy.shape == (8, 8, 8)
     assert occupancy.max() == 1.0
     assert occupancy.sum() > 0.0
+
+
+def test_general_convert_file_pointcloud_to_sdf_warns_and_marks_unsigned(tmp_path):
+    points_path = tmp_path / "points.npz"
+    sdf_path = tmp_path / "sdf_grid.npz"
+    np.savez_compressed(points_path, points=np.array([[0.0, 0.0, 0.0]], dtype=np.float32))
+
+    with pytest.warns(UserWarning, match="unsigned nearest-surface distance grid"):
+        convert_file(
+            points_path,
+            sdf_path,
+            source_modality="pointcloud",
+            target_modality="sdf-grid",
+            resolution=4,
+        )
+
+    metadata = sdf_path.with_suffix(".npz.json").read_text()
+    assert '"sdf_sign": "unsigned"' in metadata
+    assert "unsigned_nearest_surface" in metadata

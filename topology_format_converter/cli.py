@@ -615,6 +615,10 @@ def build_parser() -> argparse.ArgumentParser:
     general_convert = subparsers.add_parser(
         "convert-file",
         help="Convert one file between volume, occupancy, SDF grid/sample, mesh, point-cloud, and cache modalities.",
+        epilog=(
+            "Note: mesh or pointcloud to sdf-grid writes an unsigned nearest-surface "
+            "distance grid unless signed volumetric information is available."
+        ),
     )
     general_convert.add_argument("input")
     general_convert.add_argument("--out", required=True)
