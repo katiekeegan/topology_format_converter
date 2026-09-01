@@ -1,11 +1,11 @@
 # Topology Format Converter
 
 `topology_format_converter` is a small Python package for converting topology
-optimization volume data, signed-distance grids, SDF training caches, point
-clouds, and meshes.
+optimization shape data between signed-distance function (SDF), voxel,
+mesh, surface point-cloud, and training-cache representations.
 
 The core package is not tied to any one dataset or project. Plain `.npy`,
-`.npz`, `.pt`, OBJ, STL, PLY, and VTK-style workflows are first-class.
+`.npz`, `.pt`, OBJ, STL, PLY, CSV, and VTK-style workflows are first-class.
 SELTO/DL4TO are particular supported instances: the package includes dedicated
 adapter commands for those samples, but the conversion utilities are meant for
 general topology optimization data.
@@ -39,6 +39,26 @@ DL4TO package from another project, include it on `PYTHONPATH`:
 export PYTHONPATH=/path/to/DL4TO-parent:.
 ```
 
+## Data Modalities
+
+The package distinguishes representation from file extension. This matters
+because `.npz` can contain a density grid, occupancy grid, SDF grid, SDF point
+samples, a surface point cloud, or a training cache. When the file is
+ambiguous, pass `--source-modality`, `--target-modality`, and key names such as
+`--input-key`, `--points-key`, or `--sdf-key`.
+
+Supported modalities:
+
+```text
+volume          3-D scalar grid, usually density
+occupancy       3-D binary voxel grid
+sdf-grid        dense 3-D signed-distance or distance grid
+sdf-samples     point samples with SDF values, e.g. query_points/query_sdf
+mesh            OBJ/STL/PLY/OFF/GLB/GLTF mesh
+pointcloud      surface points with optional normals
+training-cache  .npz bundle with density, SDF grid, surface points, query points
+```
+
 ## Supported Conversions
 
 ```text
@@ -46,15 +66,30 @@ SELTO/DL4TO sample -> OBJ/STL/PLY mesh
 SELTO/DL4TO sample -> .npy/.npz density volume
 SELTO/DL4TO sample -> SDF training cache (.npz)
 SELTO/DL4TO sample range -> batch mesh/cache/volume/SDF export
-.npy/.npz/.pt volume -> OBJ/STL/PLY mesh
-.npy/.npz/.pt volume -> signed-distance grid (.npy/.npz)
-.npy/.npz/.pt volume -> SDF training cache (.npz)
-.npy/.npz/.pt volume -> legacy .vtk scalar grid for ParaView
-SDF training cache (.npz) -> OBJ/STL/PLY mesh
-SDF training cache (.npz) -> cache summary
-OBJ/STL/PLY mesh -> sampled point cloud (.npz/.csv/.ply)
+volume/occupancy -> OBJ/STL/PLY/OFF/GLB/GLTF mesh
+volume/occupancy -> signed-distance grid (.npy/.npz)
+volume/occupancy -> SDF training cache (.npz)
+volume/occupancy -> sampled surface point cloud (.npz/.csv/.ply)
+volume/occupancy -> legacy .vtk scalar grid for ParaView
+sdf-grid -> zero-level mesh
+sdf-grid -> sampled zero-level point cloud
+sdf-samples -> SDF samples (.npz/.csv)
+sdf-samples -> point cloud positions (.npz/.csv/.ply)
 mesh -> mesh format supported by trimesh
+mesh -> sampled surface point cloud (.npz/.csv/.ply)
+mesh -> surface occupancy grid (.npy/.npz)
+mesh -> unsigned nearest-surface distance grid (.npy/.npz)
+pointcloud -> point cloud format conversion (.npz/.csv/.ply)
+pointcloud -> surface occupancy grid (.npy/.npz)
+pointcloud -> unsigned nearest-surface distance grid (.npy/.npz)
+training-cache -> mesh, point cloud, SDF samples, SDF grid, or volume
+training-cache -> cache summary
 ```
+
+Converting a mesh or surface point cloud to an SDF grid produces an unsigned
+nearest-surface distance grid unless a signed volumetric representation is
+already available. A point cloud alone usually does not contain reliable
+inside/outside information.
 
 ## Command Line
 
@@ -156,6 +191,37 @@ topology-convert mesh-to-pointcloud sphere_complex_0.obj \
   --out sphere_complex_0_points.npz
 ```
 
+Use the general conversion dispatcher when the source and target modalities are
+known:
+
+```bash
+topology-convert convert-file density.npz \
+  --source-modality volume \
+  --target-modality mesh \
+  --input-key density \
+  --threshold 0.5 \
+  --coordinate-mode unit-box \
+  --out density.obj
+
+topology-convert convert-file density.obj \
+  --source-modality mesh \
+  --target-modality pointcloud \
+  --num-points 10000 \
+  --out density_points.csv
+
+topology-convert convert-file density_points.csv \
+  --source-modality pointcloud \
+  --target-modality occupancy \
+  --resolution 64 \
+  --mark-radius 1 \
+  --out density_surface_occupancy.npz
+
+topology-convert convert-file cache.npz \
+  --source-modality training-cache \
+  --target-modality sdf-samples \
+  --out query_sdf.csv
+```
+
 Batch-convert a range of SELTO/DL4TO samples:
 
 ```bash
@@ -182,10 +248,16 @@ topology-convert cache-inspect sphere_complex_0_cache.npz
 ```python
 from topology_format_converter import (
     cache_to_mesh,
+    convert_file,
     density_to_training_cache,
     export_mesh,
+    load_pointcloud,
     load_selto_sample,
+    make_sdf_samples,
     mesh_to_pointcloud,
+    pointcloud_to_distance_grid,
+    pointcloud_to_occupancy,
+    save_sdf_samples,
     save_training_cache,
     save_volume,
     signed_distance_from_density,
@@ -204,6 +276,20 @@ save_training_cache(cache, "sphere_complex_0_cache.npz")
 
 mesh_from_cache = cache_to_mesh(cache)
 points, normals = mesh_to_pointcloud(mesh, num_points=10000)
+
+occupancy = pointcloud_to_occupancy(points, shape=(64, 64, 64), coordinate_mode="training")
+distance_grid = pointcloud_to_distance_grid(points, shape=(64, 64, 64), coordinate_mode="training")
+
+sdf_samples = make_sdf_samples(cache.query_points, cache.query_sdf)
+save_sdf_samples(sdf_samples, "query_sdf.csv")
+
+convert_file(
+    "sphere_complex_0_density.npz",
+    "sphere_complex_0.obj",
+    source_modality="volume",
+    target_modality="mesh",
+    input_key="density",
+)
 ```
 
 ## Coordinate Modes

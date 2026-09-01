@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "topology-format-converter"
-version = "0.1.0"
-description = "Format conversion utilities for topology optimization volumes, SDF grids, caches, point clouds, and meshes."
+version = "0.2.0"
+description = "Modality conversion utilities for topology optimization SDFs, voxels, point clouds, and meshes."
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [

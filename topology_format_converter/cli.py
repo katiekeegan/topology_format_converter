@@ -8,10 +8,12 @@ from typing import Iterable, Optional
 import numpy as np
 
 from .cache import cache_summary, cache_to_mesh, density_to_training_cache, load_training_cache, save_training_cache
+from .convert import Modality, convert_file
 from .mesh import convert_mesh, density_to_mesh, export_mesh, load_mesh, mesh_summary
 from .metadata import ConversionMetadata, metadata_sidecar_path, write_metadata
-from .pointcloud import export_pointcloud, load_mesh_as_pointcloud
+from .pointcloud import export_pointcloud, load_mesh_as_pointcloud, load_pointcloud, pointcloud_summary
 from .selto import iter_selto_samples, load_selto_sample, selto_sample_to_cache, selto_sample_to_mesh
+from .sdf import load_sdf_samples, sdf_samples_summary
 from .volume import (
     load_volume,
     save_signed_distance,
@@ -56,6 +58,27 @@ def _add_cache_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--surface-sample-ratio", type=float, default=0.7)
     parser.add_argument("--noise-std", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=None)
+
+
+def _add_general_conversion_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--source-modality", choices=MODALITY_CHOICES, default=None)
+    parser.add_argument("--target-modality", choices=MODALITY_CHOICES, default=None)
+    parser.add_argument("--input-key", default=None)
+    parser.add_argument("--points-key", default="points")
+    parser.add_argument("--normals-key", default="normals")
+    parser.add_argument("--sdf-key", default="query_sdf")
+    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--coordinate-mode", choices=("voxel", "unit-box", "training"), default="unit-box")
+    parser.add_argument("--spacing", nargs=3, metavar=("DX", "DY", "DZ"))
+    parser.add_argument("--resolution", nargs="+", type=int, default=[64])
+    parser.add_argument("--num-points", type=int, default=10000)
+    parser.add_argument("--mark-radius", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--no-repair", action="store_true")
+    parser.add_argument("--no-metadata", action="store_true")
+
+
+MODALITY_CHOICES = ("volume", "occupancy", "sdf-grid", "sdf-samples", "mesh", "pointcloud", "training-cache")
 
 
 def _selto_metadata(
@@ -321,6 +344,38 @@ def cmd_mesh_convert(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_convert_file(args: argparse.Namespace) -> int:
+    resolution: int | tuple[int, int, int]
+    if len(args.resolution) == 1:
+        resolution = int(args.resolution[0])
+    elif len(args.resolution) == 3:
+        resolution = tuple(int(value) for value in args.resolution)
+    else:
+        raise ValueError("--resolution expects either one integer or three integers.")
+    normals_key = None if args.normals_key.lower() in {"", "none", "null"} else args.normals_key
+    convert_file(
+        args.input,
+        args.out,
+        source_modality=args.source_modality,
+        target_modality=args.target_modality,
+        input_key=args.input_key,
+        points_key=args.points_key,
+        normals_key=normals_key,
+        sdf_key=args.sdf_key,
+        threshold=args.threshold,
+        coordinate_mode=args.coordinate_mode,
+        spacing=_spacing(args.spacing),
+        resolution=resolution,
+        num_points=args.num_points,
+        mark_radius=args.mark_radius,
+        seed=args.seed,
+        no_repair=args.no_repair,
+        no_metadata=args.no_metadata,
+    )
+    print(args.out)
+    return 0
+
+
 def cmd_inspect(args: argparse.Namespace) -> int:
     path = Path(args.input)
     suffix = path.suffix.lower()
@@ -333,6 +388,26 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             return 0
         except KeyError:
             pass
+        try:
+            _print_json(sdf_samples_summary(load_sdf_samples(path)))
+            return 0
+        except Exception:
+            pass
+        try:
+            points, normals = load_pointcloud(path)
+            _print_json(pointcloud_summary(points, normals))
+            return 0
+        except Exception:
+            pass
+    if suffix == ".csv":
+        try:
+            _print_json(sdf_samples_summary(load_sdf_samples(path)))
+            return 0
+        except Exception:
+            pass
+        points, normals = load_pointcloud(path)
+        _print_json(pointcloud_summary(points, normals))
+        return 0
 
     density = load_volume(path, key=args.input_key)
     sdf = signed_distance_from_density(density, threshold=args.threshold)
@@ -536,6 +611,15 @@ def build_parser() -> argparse.ArgumentParser:
     mesh_convert.add_argument("--out", required=True)
     mesh_convert.add_argument("--no-metadata", action="store_true")
     mesh_convert.set_defaults(func=cmd_mesh_convert)
+
+    general_convert = subparsers.add_parser(
+        "convert-file",
+        help="Convert one file between volume, occupancy, SDF grid/sample, mesh, point-cloud, and cache modalities.",
+    )
+    general_convert.add_argument("input")
+    general_convert.add_argument("--out", required=True)
+    _add_general_conversion_args(general_convert)
+    general_convert.set_defaults(func=cmd_convert_file)
 
     selto_batch = subparsers.add_parser("selto-batch", help="Batch-convert a range of SELTO/DL4TO samples.")
     selto_batch.add_argument("--root", default=".")
