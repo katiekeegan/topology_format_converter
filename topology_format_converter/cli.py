@@ -7,13 +7,31 @@ from typing import Iterable, Optional
 
 import numpy as np
 
-from .cache import cache_summary, cache_to_mesh, density_to_training_cache, load_training_cache, save_training_cache
+from .cache import (
+    cache_summary,
+    cache_to_mesh,
+    density_to_training_cache,
+    load_training_cache,
+    save_training_cache,
+)
 from .convert import Modality, convert_file
+from .field import field_samples_summary, load_field_samples
 from .mesh import convert_mesh, density_to_mesh, export_mesh, load_mesh, mesh_summary
 from .metadata import ConversionMetadata, metadata_sidecar_path, write_metadata
-from .pointcloud import export_pointcloud, load_mesh_as_pointcloud, load_pointcloud, pointcloud_summary
-from .selto import iter_selto_samples, load_selto_sample, selto_sample_to_cache, selto_sample_to_mesh
+from .pointcloud import (
+    export_pointcloud,
+    load_mesh_as_pointcloud,
+    load_pointcloud,
+    pointcloud_summary,
+)
+from .selto import (
+    iter_selto_samples,
+    load_selto_sample,
+    selto_sample_to_cache,
+    selto_sample_to_mesh,
+)
 from .sdf import load_sdf_samples, sdf_samples_summary
+from .sparse import load_sparse_voxels, sparse_voxels_summary
 from .volume import (
     load_volume,
     save_signed_distance,
@@ -48,7 +66,11 @@ def _target_format(path: str | Path) -> str:
 
 def _add_common_volume_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--threshold", type=float, default=0.5)
-    parser.add_argument("--coordinate-mode", choices=("voxel", "unit-box", "training"), default="training")
+    parser.add_argument(
+        "--coordinate-mode",
+        choices=("voxel", "unit-box", "training"),
+        default="training",
+    )
     parser.add_argument("--spacing", nargs=3, metavar=("DX", "DY", "DZ"))
 
 
@@ -67,18 +89,37 @@ def _add_general_conversion_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--points-key", default="points")
     parser.add_argument("--normals-key", default="normals")
     parser.add_argument("--sdf-key", default="query_sdf")
+    parser.add_argument("--values-key", default="values")
+    parser.add_argument("--field-name", default=None)
     parser.add_argument("--threshold", type=float, default=0.5)
-    parser.add_argument("--coordinate-mode", choices=("voxel", "unit-box", "training"), default="unit-box")
+    parser.add_argument(
+        "--coordinate-mode",
+        choices=("voxel", "unit-box", "training"),
+        default="unit-box",
+    )
     parser.add_argument("--spacing", nargs=3, metavar=("DX", "DY", "DZ"))
     parser.add_argument("--resolution", nargs="+", type=int, default=[64])
     parser.add_argument("--num-points", type=int, default=10000)
     parser.add_argument("--mark-radius", type=int, default=0)
+    parser.add_argument("--truncation", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-repair", action="store_true")
     parser.add_argument("--no-metadata", action="store_true")
 
 
-MODALITY_CHOICES = ("volume", "occupancy", "sdf-grid", "sdf-samples", "mesh", "pointcloud", "training-cache")
+MODALITY_CHOICES = (
+    "volume",
+    "occupancy",
+    "sdf-grid",
+    "udf-grid",
+    "tsdf-grid",
+    "sdf-samples",
+    "field-samples",
+    "sparse-voxels",
+    "mesh",
+    "pointcloud",
+    "training-cache",
+)
 
 
 def _selto_metadata(
@@ -132,7 +173,9 @@ def _save_selto_volume(sample, args: argparse.Namespace, out_path: str | Path) -
 
 
 def _sdf_from_density(density, args: argparse.Namespace, spacing=None) -> np.ndarray:
-    sdf = signed_distance_from_density(density, threshold=args.threshold, spacing=spacing)
+    sdf = signed_distance_from_density(
+        density, threshold=args.threshold, spacing=spacing
+    )
     if getattr(args, "normalize_sdf", False):
         scale = sdf_normalization_scale(density.shape, spacing=spacing)
         if scale > 0:
@@ -304,7 +347,9 @@ def cmd_cache_to_mesh(args: argparse.Namespace) -> int:
         source_format="training-cache",
         target_format=_target_format(args.out),
         source_path=str(args.input),
-        threshold=args.threshold if args.threshold is not None else cache.metadata.threshold,
+        threshold=(
+            args.threshold if args.threshold is not None else cache.metadata.threshold
+        ),
         voxel_shape=tuple(int(value) for value in cache.density.shape),
         spacing=_spacing(args.spacing) if args.coordinate_mode == "voxel" else None,
         coordinate_mode=args.coordinate_mode or cache.metadata.coordinate_mode,
@@ -321,14 +366,18 @@ def cmd_cache_inspect(args: argparse.Namespace) -> int:
 
 
 def cmd_mesh_to_pointcloud(args: argparse.Namespace) -> int:
-    points, normals = load_mesh_as_pointcloud(args.input, num_points=args.num_points, seed=args.seed)
+    points, normals = load_mesh_as_pointcloud(
+        args.input, num_points=args.num_points, seed=args.seed
+    )
     metadata = ConversionMetadata(
         source_format=_source_format(args.input),
         target_format=_target_format(args.out),
         source_path=str(args.input),
         extra={"num_points": int(args.num_points), "arrays": ["points", "normals"]},
     )
-    export_pointcloud(points, normals, args.out, metadata=metadata, write_sidecar=not args.no_metadata)
+    export_pointcloud(
+        points, normals, args.out, metadata=metadata, write_sidecar=not args.no_metadata
+    )
     print(args.out)
     return 0
 
@@ -339,7 +388,9 @@ def cmd_mesh_convert(args: argparse.Namespace) -> int:
         target_format=_target_format(args.out),
         source_path=str(args.input),
     )
-    convert_mesh(args.input, args.out, metadata=metadata, write_sidecar=not args.no_metadata)
+    convert_mesh(
+        args.input, args.out, metadata=metadata, write_sidecar=not args.no_metadata
+    )
     print(args.out)
     return 0
 
@@ -352,7 +403,9 @@ def cmd_convert_file(args: argparse.Namespace) -> int:
         resolution = tuple(int(value) for value in args.resolution)
     else:
         raise ValueError("--resolution expects either one integer or three integers.")
-    normals_key = None if args.normals_key.lower() in {"", "none", "null"} else args.normals_key
+    normals_key = (
+        None if args.normals_key.lower() in {"", "none", "null"} else args.normals_key
+    )
     convert_file(
         args.input,
         args.out,
@@ -362,12 +415,15 @@ def cmd_convert_file(args: argparse.Namespace) -> int:
         points_key=args.points_key,
         normals_key=normals_key,
         sdf_key=args.sdf_key,
+        values_key=args.values_key,
+        field_name=args.field_name,
         threshold=args.threshold,
         coordinate_mode=args.coordinate_mode,
         spacing=_spacing(args.spacing),
         resolution=resolution,
         num_points=args.num_points,
         mark_radius=args.mark_radius,
+        truncation=args.truncation,
         seed=args.seed,
         no_repair=args.no_repair,
         no_metadata=args.no_metadata,
@@ -389,7 +445,17 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         except KeyError:
             pass
         try:
+            _print_json(sparse_voxels_summary(load_sparse_voxels(path)))
+            return 0
+        except Exception:
+            pass
+        try:
             _print_json(sdf_samples_summary(load_sdf_samples(path)))
+            return 0
+        except Exception:
+            pass
+        try:
+            _print_json(field_samples_summary(load_field_samples(path)))
             return 0
         except Exception:
             pass
@@ -402,6 +468,11 @@ def cmd_inspect(args: argparse.Namespace) -> int:
     if suffix == ".csv":
         try:
             _print_json(sdf_samples_summary(load_sdf_samples(path)))
+            return 0
+        except Exception:
+            pass
+        try:
+            _print_json(field_samples_summary(load_field_samples(path)))
             return 0
         except Exception:
             pass
@@ -471,7 +542,9 @@ def cmd_selto_batch(args: argparse.Namespace) -> int:
                 coordinate_mode=args.coordinate_mode,
                 extra={"mesh": mesh_summary(mesh)},
             )
-            export_mesh(mesh, out_path, metadata=metadata, write_sidecar=not args.no_metadata)
+            export_mesh(
+                mesh, out_path, metadata=metadata, write_sidecar=not args.no_metadata
+            )
         elif args.kind == "cache":
             cache = selto_sample_to_cache(
                 sample,
@@ -496,7 +569,13 @@ def cmd_selto_batch(args: argparse.Namespace) -> int:
                 threshold=args.threshold,
                 extra={"array": "sdf", "normalize_sdf": bool(args.normalize_sdf)},
             )
-            save_volume(out_path, sdf, key="sdf", metadata=metadata, write_sidecar=not args.no_metadata)
+            save_volume(
+                out_path,
+                sdf,
+                key="sdf",
+                metadata=metadata,
+                write_sidecar=not args.no_metadata,
+            )
         else:
             raise ValueError(f"Unsupported batch kind {args.kind!r}.")
         written.append(str(out_path))
@@ -512,7 +591,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    selto_mesh = subparsers.add_parser("selto-to-mesh", help="Export one SELTO/DL4TO sample as OBJ/STL/PLY/etc.")
+    selto_mesh = subparsers.add_parser(
+        "selto-to-mesh", help="Export one SELTO/DL4TO sample as OBJ/STL/PLY/etc."
+    )
     selto_mesh.add_argument("--root", default=".")
     selto_mesh.add_argument("--dataset", required=True)
     selto_mesh.add_argument("--split", choices=("train", "test"), default="train")
@@ -524,7 +605,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_volume_args(selto_mesh)
     selto_mesh.set_defaults(func=cmd_selto_to_mesh)
 
-    selto_volume = subparsers.add_parser("selto-to-volume", help="Export one SELTO/DL4TO sample density as .npy or .npz.")
+    selto_volume = subparsers.add_parser(
+        "selto-to-volume", help="Export one SELTO/DL4TO sample density as .npy or .npz."
+    )
     selto_volume.add_argument("--root", default=".")
     selto_volume.add_argument("--dataset", required=True)
     selto_volume.add_argument("--split", choices=("train", "test"), default="train")
@@ -535,7 +618,9 @@ def build_parser() -> argparse.ArgumentParser:
     selto_volume.add_argument("--quiet", action="store_true")
     selto_volume.set_defaults(func=cmd_selto_to_volume)
 
-    volume_mesh = subparsers.add_parser("volume-to-mesh", help="Export a .npy/.npz/.pt volume as OBJ/STL/PLY/etc.")
+    volume_mesh = subparsers.add_parser(
+        "volume-to-mesh", help="Export a .npy/.npz/.pt volume as OBJ/STL/PLY/etc."
+    )
     volume_mesh.add_argument("input")
     volume_mesh.add_argument("--out", required=True)
     volume_mesh.add_argument("--input-key", default=None)
@@ -544,7 +629,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_volume_args(volume_mesh)
     volume_mesh.set_defaults(func=cmd_volume_to_mesh)
 
-    volume_sdf = subparsers.add_parser("volume-to-sdf", help="Export a signed-distance grid from a .npy/.npz/.pt volume.")
+    volume_sdf = subparsers.add_parser(
+        "volume-to-sdf",
+        help="Export a signed-distance grid from a .npy/.npz/.pt volume.",
+    )
     volume_sdf.add_argument("input")
     volume_sdf.add_argument("--out", required=True)
     volume_sdf.add_argument("--input-key", default=None)
@@ -554,7 +642,9 @@ def build_parser() -> argparse.ArgumentParser:
     volume_sdf.add_argument("--no-metadata", action="store_true")
     volume_sdf.set_defaults(func=cmd_volume_to_sdf)
 
-    volume_vtk = subparsers.add_parser("volume-to-vtk", help="Export a scalar volume as legacy .vtk for ParaView.")
+    volume_vtk = subparsers.add_parser(
+        "volume-to-vtk", help="Export a scalar volume as legacy .vtk for ParaView."
+    )
     volume_vtk.add_argument("input")
     volume_vtk.add_argument("--out", required=True)
     volume_vtk.add_argument("--input-key", default=None)
@@ -563,7 +653,10 @@ def build_parser() -> argparse.ArgumentParser:
     volume_vtk.add_argument("--no-metadata", action="store_true")
     volume_vtk.set_defaults(func=cmd_volume_to_vtk)
 
-    selto_cache = subparsers.add_parser("selto-to-cache", help="Build an SDF training cache from one SELTO/DL4TO sample.")
+    selto_cache = subparsers.add_parser(
+        "selto-to-cache",
+        help="Build an SDF training cache from one SELTO/DL4TO sample.",
+    )
     selto_cache.add_argument("--root", default=".")
     selto_cache.add_argument("--dataset", required=True)
     selto_cache.add_argument("--split", choices=("train", "test"), default="train")
@@ -575,7 +668,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_cache_args(selto_cache)
     selto_cache.set_defaults(func=cmd_selto_to_cache)
 
-    volume_cache = subparsers.add_parser("volume-to-cache", help="Build an SDF training cache from a .npy/.npz/.pt volume.")
+    volume_cache = subparsers.add_parser(
+        "volume-to-cache",
+        help="Build an SDF training cache from a .npy/.npz/.pt volume.",
+    )
     volume_cache.add_argument("input")
     volume_cache.add_argument("--out", required=True)
     volume_cache.add_argument("--input-key", default=None)
@@ -584,21 +680,30 @@ def build_parser() -> argparse.ArgumentParser:
     _add_cache_args(volume_cache)
     volume_cache.set_defaults(func=cmd_volume_to_cache)
 
-    cache_mesh = subparsers.add_parser("cache-to-mesh", help="Rebuild a mesh from a saved SDF training cache density.")
+    cache_mesh = subparsers.add_parser(
+        "cache-to-mesh", help="Rebuild a mesh from a saved SDF training cache density."
+    )
     cache_mesh.add_argument("input")
     cache_mesh.add_argument("--out", required=True)
     cache_mesh.add_argument("--threshold", type=float, default=None)
-    cache_mesh.add_argument("--coordinate-mode", choices=("voxel", "unit-box", "training"), default=None)
+    cache_mesh.add_argument(
+        "--coordinate-mode", choices=("voxel", "unit-box", "training"), default=None
+    )
     cache_mesh.add_argument("--spacing", nargs=3, metavar=("DX", "DY", "DZ"))
     cache_mesh.add_argument("--no-repair", action="store_true")
     cache_mesh.add_argument("--no-metadata", action="store_true")
     cache_mesh.set_defaults(func=cmd_cache_to_mesh)
 
-    cache_inspect = subparsers.add_parser("cache-inspect", help="Summarize a saved SDF training cache.")
+    cache_inspect = subparsers.add_parser(
+        "cache-inspect", help="Summarize a saved SDF training cache."
+    )
     cache_inspect.add_argument("input")
     cache_inspect.set_defaults(func=cmd_cache_inspect)
 
-    pointcloud = subparsers.add_parser("mesh-to-pointcloud", help="Sample mesh surface points and normals as .npz, .csv, or .ply.")
+    pointcloud = subparsers.add_parser(
+        "mesh-to-pointcloud",
+        help="Sample mesh surface points and normals as .npz, .csv, or .ply.",
+    )
     pointcloud.add_argument("input")
     pointcloud.add_argument("--out", required=True)
     pointcloud.add_argument("--num-points", type=int, default=10000)
@@ -606,7 +711,9 @@ def build_parser() -> argparse.ArgumentParser:
     pointcloud.add_argument("--no-metadata", action="store_true")
     pointcloud.set_defaults(func=cmd_mesh_to_pointcloud)
 
-    mesh_convert = subparsers.add_parser("mesh-convert", help="Convert between mesh formats supported by trimesh.")
+    mesh_convert = subparsers.add_parser(
+        "mesh-convert", help="Convert between mesh formats supported by trimesh."
+    )
     mesh_convert.add_argument("input")
     mesh_convert.add_argument("--out", required=True)
     mesh_convert.add_argument("--no-metadata", action="store_true")
@@ -614,10 +721,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     general_convert = subparsers.add_parser(
         "convert-file",
-        help="Convert one file between volume, occupancy, SDF grid/sample, mesh, point-cloud, and cache modalities.",
+        help="Convert one file between volume, occupancy, distance-grid, sample, sparse, mesh, point-cloud, and cache modalities.",
         epilog=(
             "Note: mesh or pointcloud to sdf-grid writes an unsigned nearest-surface "
-            "distance grid unless signed volumetric information is available."
+            "distance grid unless signed volumetric information is available. Use "
+            "udf-grid when unsigned distance is the intended output."
         ),
     )
     general_convert.add_argument("input")
@@ -625,13 +733,17 @@ def build_parser() -> argparse.ArgumentParser:
     _add_general_conversion_args(general_convert)
     general_convert.set_defaults(func=cmd_convert_file)
 
-    selto_batch = subparsers.add_parser("selto-batch", help="Batch-convert a range of SELTO/DL4TO samples.")
+    selto_batch = subparsers.add_parser(
+        "selto-batch", help="Batch-convert a range of SELTO/DL4TO samples."
+    )
     selto_batch.add_argument("--root", default=".")
     selto_batch.add_argument("--dataset", required=True)
     selto_batch.add_argument("--split", choices=("train", "test"), default="train")
     selto_batch.add_argument("--start", type=int, default=0)
     selto_batch.add_argument("--count", type=int, required=True)
-    selto_batch.add_argument("--kind", choices=("mesh", "cache", "volume", "sdf"), required=True)
+    selto_batch.add_argument(
+        "--kind", choices=("mesh", "cache", "volume", "sdf"), required=True
+    )
     selto_batch.add_argument("--out-dir", required=True)
     selto_batch.add_argument("--mesh-format", default="obj")
     selto_batch.add_argument("--array-format", choices=("npy", "npz"), default="npz")
@@ -645,7 +757,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_cache_args(selto_batch)
     selto_batch.set_defaults(func=cmd_selto_batch)
 
-    inspect = subparsers.add_parser("inspect", help="Print basic mesh, cache, or volume statistics.")
+    inspect = subparsers.add_parser(
+        "inspect", help="Print basic mesh, cache, or volume statistics."
+    )
     inspect.add_argument("input")
     inspect.add_argument("--input-key", default=None)
     inspect.add_argument("--threshold", type=float, default=0.5)

@@ -8,7 +8,6 @@ from scipy.ndimage import distance_transform_edt, map_coordinates
 
 from .metadata import ConversionMetadata, metadata_sidecar_path, write_metadata
 
-
 VALID_COORDINATE_MODES = ("voxel", "unit-box", "training")
 
 
@@ -39,7 +38,9 @@ def as_3d_array(value: Any, *, name: str = "volume") -> np.ndarray:
     return array.astype(np.float32, copy=False)
 
 
-def parse_spacing(spacing: Optional[Iterable[float]]) -> Optional[tuple[float, float, float]]:
+def parse_spacing(
+    spacing: Optional[Iterable[float]],
+) -> Optional[tuple[float, float, float]]:
     if spacing is None:
         return None
     values = tuple(float(value) for value in spacing)
@@ -52,7 +53,9 @@ def parse_spacing(spacing: Optional[Iterable[float]]) -> Optional[tuple[float, f
 
 def validate_coordinate_mode(coordinate_mode: str) -> str:
     if coordinate_mode not in VALID_COORDINATE_MODES:
-        raise ValueError(f"coordinate_mode must be one of {VALID_COORDINATE_MODES}; got {coordinate_mode!r}.")
+        raise ValueError(
+            f"coordinate_mode must be one of {VALID_COORDINATE_MODES}; got {coordinate_mode!r}."
+        )
     return coordinate_mode
 
 
@@ -61,16 +64,34 @@ def extract_density(obj: Any, key: Optional[str] = None) -> np.ndarray:
 
     if key is not None:
         if not isinstance(obj, dict):
-            raise ValueError("--input-key can only be used when the loaded object is a dict-like object.")
+            raise ValueError(
+                "--input-key can only be used when the loaded object is a dict-like object."
+            )
         if key not in obj:
-            raise KeyError(f"Could not find key {key!r}. Available keys: {sorted(obj.keys())}")
+            raise KeyError(
+                f"Could not find key {key!r}. Available keys: {sorted(obj.keys())}"
+            )
         return as_3d_array(obj[key], name=key)
 
     if isinstance(obj, dict):
-        for candidate in ("density", "theta", "volume", "voxel_grid", "sdf"):
+        for candidate in (
+            "density",
+            "theta",
+            "volume",
+            "voxel_grid",
+            "occupancy",
+            "sdf",
+            "sdf_grid",
+            "udf",
+            "udf_grid",
+            "tsdf",
+            "tsdf_grid",
+        ):
             if candidate in obj:
                 return as_3d_array(obj[candidate], name=candidate)
-        raise KeyError(f"Could not infer a density key. Available keys: {sorted(obj.keys())}")
+        raise KeyError(
+            f"Could not infer a density key. Available keys: {sorted(obj.keys())}"
+        )
 
     if isinstance(obj, (tuple, list)) and len(obj) >= 2:
         solution = obj[1]
@@ -94,7 +115,19 @@ def load_volume(path: str | Path, key: Optional[str] = None) -> np.ndarray:
     if suffix == ".npz":
         with np.load(path, allow_pickle=False) as data:
             if key is None:
-                for candidate in ("density", "theta", "volume", "voxel_grid", "sdf"):
+                for candidate in (
+                    "density",
+                    "theta",
+                    "volume",
+                    "voxel_grid",
+                    "occupancy",
+                    "sdf",
+                    "sdf_grid",
+                    "udf",
+                    "udf_grid",
+                    "tsdf",
+                    "tsdf_grid",
+                ):
                     if candidate in data:
                         key = candidate
                         break
@@ -104,7 +137,9 @@ def load_volume(path: str | Path, key: Optional[str] = None) -> np.ndarray:
                         raise KeyError(f"No array keys found in {path}.")
                     key = keys[0]
             if key not in data:
-                raise KeyError(f"Could not find key {key!r}. Available keys: {data.files}")
+                raise KeyError(
+                    f"Could not find key {key!r}. Available keys: {data.files}"
+                )
             return as_3d_array(data[key], name=key)
 
     if suffix in {".pt", ".pth"}:
@@ -117,7 +152,9 @@ def load_volume(path: str | Path, key: Optional[str] = None) -> np.ndarray:
             obj = torch.load(path, map_location="cpu")
         return extract_density(obj, key=key)
 
-    raise ValueError(f"Unsupported volume file extension {suffix!r}. Use .npy, .npz, .pt, or .pth.")
+    raise ValueError(
+        f"Unsupported volume file extension {suffix!r}. Use .npy, .npz, .pt, or .pth."
+    )
 
 
 def save_volume_npz(path: str | Path, volume: Any, *, key: str = "density") -> Path:
@@ -146,7 +183,9 @@ def save_volume(
     elif suffix == ".npz":
         np.savez_compressed(path, **{key: array})
     else:
-        raise ValueError(f"Unsupported volume output extension {suffix!r}. Use .npy or .npz.")
+        raise ValueError(
+            f"Unsupported volume output extension {suffix!r}. Use .npy or .npz."
+        )
     if metadata is not None and write_sidecar:
         write_metadata(metadata, metadata_sidecar_path(path))
     return path
@@ -165,7 +204,9 @@ def save_volume_arrays_npz(
     if path.suffix.lower() != ".npz":
         raise ValueError("Multiple arrays can only be saved to .npz.")
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(path, **{key: np.asarray(to_numpy(value)) for key, value in arrays.items()})
+    np.savez_compressed(
+        path, **{key: np.asarray(to_numpy(value)) for key, value in arrays.items()}
+    )
     if metadata is not None and write_sidecar:
         write_metadata(metadata, metadata_sidecar_path(path))
     return path
@@ -193,6 +234,18 @@ def signed_distance_from_density(
     return (outside - inside).astype(np.float32, copy=False)
 
 
+def truncate_distance_grid(distance_grid: Any, truncation: float) -> np.ndarray:
+    """Clip a signed-distance-like grid to a truncation band."""
+
+    truncation_value = float(truncation)
+    if truncation_value <= 0:
+        raise ValueError(f"truncation must be positive; got {truncation}.")
+    distance = as_3d_array(distance_grid, name="distance_grid")
+    return np.clip(distance, -truncation_value, truncation_value).astype(
+        np.float32, copy=False
+    )
+
+
 def save_signed_distance(
     path: str | Path,
     density: Any,
@@ -204,12 +257,16 @@ def save_signed_distance(
     write_sidecar: bool = True,
 ) -> Path:
     density_array = as_3d_array(density, name="density")
-    sdf = signed_distance_from_density(density_array, threshold=threshold, spacing=spacing)
+    sdf = signed_distance_from_density(
+        density_array, threshold=threshold, spacing=spacing
+    )
     if normalize:
         scale = sdf_normalization_scale(density_array.shape, spacing=spacing)
         if scale > 0:
             sdf = sdf / scale
-    return save_volume(path, sdf, key="sdf", metadata=metadata, write_sidecar=write_sidecar)
+    return save_volume(
+        path, sdf, key="sdf", metadata=metadata, write_sidecar=write_sidecar
+    )
 
 
 def save_volume_vtk(
@@ -237,18 +294,26 @@ def save_volume_vtk(
         handle.write("ASCII\n")
         handle.write("DATASET STRUCTURED_POINTS\n")
         handle.write(f"DIMENSIONS {array.shape[0]} {array.shape[1]} {array.shape[2]}\n")
-        handle.write(f"ORIGIN {origin_values[0]} {origin_values[1]} {origin_values[2]}\n")
-        handle.write(f"SPACING {spacing_values[0]} {spacing_values[1]} {spacing_values[2]}\n")
+        handle.write(
+            f"ORIGIN {origin_values[0]} {origin_values[1]} {origin_values[2]}\n"
+        )
+        handle.write(
+            f"SPACING {spacing_values[0]} {spacing_values[1]} {spacing_values[2]}\n"
+        )
         handle.write(f"POINT_DATA {array.size}\n")
         handle.write(f"SCALARS {scalar_name} float 1\n")
         handle.write("LOOKUP_TABLE default\n")
         for start in range(0, len(values), 9):
-            handle.write(" ".join(f"{value:.9g}" for value in values[start:start + 9]))
+            handle.write(
+                " ".join(f"{value:.9g}" for value in values[start : start + 9])
+            )
             handle.write("\n")
     return path
 
 
-def sdf_normalization_scale(shape: Iterable[int], spacing: Optional[Iterable[float]] = None) -> float:
+def sdf_normalization_scale(
+    shape: Iterable[int], spacing: Optional[Iterable[float]] = None
+) -> float:
     shape_array = np.asarray(tuple(int(value) for value in shape), dtype=np.float32)
     half_extent = (shape_array - 1.0) / 2.0
     spacing_values = parse_spacing(spacing)
@@ -267,7 +332,9 @@ def voxel_indices_to_coords(
     coordinate_mode = validate_coordinate_mode(coordinate_mode)
     points_array = np.asarray(points, dtype=np.float32)
     shape_array = np.asarray(tuple(int(value) for value in shape), dtype=np.float32)
-    spacing_values = np.asarray(parse_spacing(spacing) or (1.0, 1.0, 1.0), dtype=np.float32)
+    spacing_values = np.asarray(
+        parse_spacing(spacing) or (1.0, 1.0, 1.0), dtype=np.float32
+    )
 
     if coordinate_mode == "voxel":
         return points_array * spacing_values
@@ -289,7 +356,9 @@ def coords_to_voxel_indices(
     coordinate_mode = validate_coordinate_mode(coordinate_mode)
     points_array = np.asarray(points, dtype=np.float32)
     shape_array = np.asarray(tuple(int(value) for value in shape), dtype=np.float32)
-    spacing_values = np.asarray(parse_spacing(spacing) or (1.0, 1.0, 1.0), dtype=np.float32)
+    spacing_values = np.asarray(
+        parse_spacing(spacing) or (1.0, 1.0, 1.0), dtype=np.float32
+    )
 
     if coordinate_mode == "voxel":
         return points_array / spacing_values
@@ -308,7 +377,9 @@ def coordinate_bounds(
 ) -> tuple[np.ndarray, np.ndarray]:
     coordinate_mode = validate_coordinate_mode(coordinate_mode)
     shape_array = np.asarray(tuple(int(value) for value in shape), dtype=np.float32)
-    spacing_values = np.asarray(parse_spacing(spacing) or (1.0, 1.0, 1.0), dtype=np.float32)
+    spacing_values = np.asarray(
+        parse_spacing(spacing) or (1.0, 1.0, 1.0), dtype=np.float32
+    )
 
     if coordinate_mode == "voxel":
         return np.zeros(3, dtype=np.float32), (shape_array - 1.0) * spacing_values

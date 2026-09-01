@@ -1,8 +1,9 @@
 # Topology Format Converter
 
 `topology_format_converter` is a small Python package for converting topology
-optimization shape data between signed-distance function (SDF), voxel,
-mesh, surface point-cloud, and training-cache representations.
+optimization shape data between signed-distance function (SDF), truncated SDF
+(TSDF), unsigned distance field (UDF), voxel, sparse voxel, mesh, surface
+point-cloud, scalar field-sample, and training-cache representations.
 
 The core package is not tied to any one dataset or project. Plain `.npy`,
 `.npz`, `.pt`, OBJ, STL, PLY, CSV, and VTK-style workflows are first-class.
@@ -42,10 +43,11 @@ export PYTHONPATH=/path/to/DL4TO-parent:.
 ## Data Modalities
 
 The package distinguishes representation from file extension. This matters
-because `.npz` can contain a density grid, occupancy grid, SDF grid, SDF point
-samples, a surface point cloud, or a training cache. When the file is
+because `.npz` can contain a density grid, occupancy grid, SDF/UDF/TSDF grid,
+SDF point samples, generic scalar field samples, sparse voxels, a surface point
+cloud, or a training cache. When the file is
 ambiguous, pass `--source-modality`, `--target-modality`, and key names such as
-`--input-key`, `--points-key`, or `--sdf-key`.
+`--input-key`, `--points-key`, `--sdf-key`, or `--values-key`.
 
 Supported modalities:
 
@@ -53,7 +55,11 @@ Supported modalities:
 volume          3-D scalar grid, usually density
 occupancy       3-D binary voxel grid
 sdf-grid        dense 3-D signed-distance or distance grid
+udf-grid        dense 3-D unsigned distance field
+tsdf-grid       dense 3-D truncated signed-distance field
 sdf-samples     point samples with SDF values, e.g. query_points/query_sdf
+field-samples   point samples with arbitrary scalar values, e.g. stress/density
+sparse-voxels   COO-style voxel data with indices, values, and shape arrays
 mesh            OBJ/STL/PLY/OFF/GLB/GLTF mesh
 pointcloud      surface points with optional normals
 training-cache  .npz bundle with density, SDF grid, surface points, query points
@@ -67,29 +73,40 @@ SELTO/DL4TO sample -> .npy/.npz density volume
 SELTO/DL4TO sample -> SDF training cache (.npz)
 SELTO/DL4TO sample range -> batch mesh/cache/volume/SDF export
 volume/occupancy -> OBJ/STL/PLY/OFF/GLB/GLTF mesh
-volume/occupancy -> signed-distance grid (.npy/.npz)
+volume/occupancy -> signed-distance, unsigned-distance, or truncated-SDF grid (.npy/.npz)
 volume/occupancy -> SDF training cache (.npz)
 volume/occupancy -> sampled surface point cloud (.npz/.csv/.ply)
+volume/occupancy -> sparse voxels (.npz)
+volume/occupancy -> dense point-value field samples (.npz/.csv)
 volume/occupancy -> legacy .vtk scalar grid for ParaView
-sdf-grid -> zero-level mesh
-sdf-grid -> sampled zero-level point cloud
+sdf-grid -> UDF grid, TSDF grid, zero-level mesh, sampled zero-level point cloud
+sdf-grid/UDF-grid/TSDF-grid -> sparse voxels or point-value field samples
 sdf-samples -> SDF samples (.npz/.csv)
 sdf-samples -> point cloud positions (.npz/.csv/.ply)
+sdf-samples -> generic point-value field samples (.npz/.csv)
+field-samples -> field samples, point cloud positions, or SDF samples
+sparse-voxels -> volume/occupancy, SDF/UDF/TSDF grid, mesh, point cloud, or cache
 mesh -> mesh format supported by trimesh
 mesh -> sampled surface point cloud (.npz/.csv/.ply)
 mesh -> surface occupancy grid (.npy/.npz)
 mesh -> unsigned nearest-surface distance grid (.npy/.npz)
+mesh -> sparse surface voxels (.npz)
 pointcloud -> point cloud format conversion (.npz/.csv/.ply)
 pointcloud -> surface occupancy grid (.npy/.npz)
 pointcloud -> unsigned nearest-surface distance grid (.npy/.npz)
-training-cache -> mesh, point cloud, SDF samples, SDF grid, or volume
+pointcloud -> sparse surface voxels or zero-valued field samples
+training-cache -> mesh, point cloud, SDF samples, field samples, SDF/UDF/TSDF grid, sparse voxels, or volume
 training-cache -> cache summary
 ```
 
 Converting a mesh or surface point cloud to an SDF grid produces an unsigned
 nearest-surface distance grid unless a signed volumetric representation is
 already available. A point cloud alone usually does not contain reliable
-inside/outside information.
+inside/outside information. The package warns at runtime and records
+`"sdf_sign": "unsigned"` plus `"distance_kind": "unsigned_nearest_surface"` in
+the metadata sidecar for those conversions. Use `udf-grid` when unsigned
+distance is the intended output. `tsdf-grid` conversions require signed
+information and are rejected for raw mesh or point-cloud sources.
 
 ## Command Line
 
@@ -220,6 +237,28 @@ topology-convert convert-file cache.npz \
   --source-modality training-cache \
   --target-modality sdf-samples \
   --out query_sdf.csv
+
+topology-convert convert-file density.npz \
+  --source-modality volume \
+  --target-modality udf-grid \
+  --out density_udf.npz
+
+topology-convert convert-file density.npz \
+  --source-modality volume \
+  --target-modality tsdf-grid \
+  --truncation 0.1 \
+  --out density_tsdf.npz
+
+topology-convert convert-file density.npz \
+  --source-modality occupancy \
+  --target-modality sparse-voxels \
+  --threshold 0.5 \
+  --out density_sparse.npz
+
+topology-convert convert-file query_sdf.npz \
+  --source-modality sdf-samples \
+  --target-modality field-samples \
+  --out query_field.csv
 ```
 
 Batch-convert a range of SELTO/DL4TO samples:
@@ -254,13 +293,16 @@ from topology_format_converter import (
     load_pointcloud,
     load_selto_sample,
     make_sdf_samples,
+    make_field_samples,
     mesh_to_pointcloud,
     pointcloud_to_distance_grid,
     pointcloud_to_occupancy,
     save_sdf_samples,
+    save_field_samples,
     save_training_cache,
     save_volume,
     signed_distance_from_density,
+    truncate_distance_grid,
 )
 from topology_format_converter.selto import selto_sample_to_mesh
 
@@ -282,6 +324,9 @@ distance_grid = pointcloud_to_distance_grid(points, shape=(64, 64, 64), coordina
 
 sdf_samples = make_sdf_samples(cache.query_points, cache.query_sdf)
 save_sdf_samples(sdf_samples, "query_sdf.csv")
+
+field_samples = make_field_samples(cache.query_points, cache.query_sdf, field_name="sdf")
+save_field_samples(field_samples, "query_field.csv")
 
 convert_file(
     "sphere_complex_0_density.npz",

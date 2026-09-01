@@ -14,6 +14,13 @@ from .cache import (
     save_training_cache,
 )
 from .convert import Modality, convert_file, infer_modality
+from .field import (
+    FieldSamples,
+    field_samples_summary,
+    load_field_samples,
+    make_field_samples,
+    save_field_samples,
+)
 from .mesh import convert_mesh, density_to_mesh, export_mesh, load_mesh, repair_mesh
 from .metadata import ConversionMetadata, read_metadata, write_metadata
 from .pointcloud import (
@@ -26,7 +33,22 @@ from .pointcloud import (
     pointcloud_to_occupancy,
 )
 from .selto import TopologySample, load_selto_dataset, load_selto_sample
-from .sdf import SDFSamples, load_sdf_samples, make_sdf_samples, save_sdf_samples, sdf_samples_summary
+from .sdf import (
+    SDFSamples,
+    load_sdf_samples,
+    make_sdf_samples,
+    save_sdf_samples,
+    sdf_samples_summary,
+)
+from .sparse import (
+    SparseVoxels,
+    dense_to_sparse,
+    load_sparse_voxels,
+    make_sparse_voxels,
+    save_sparse_voxels,
+    sparse_to_dense,
+    sparse_voxels_summary,
+)
 from .volume import (
     load_volume,
     save_signed_distance,
@@ -36,12 +58,15 @@ from .volume import (
     save_volume_vtk,
     signed_distance_from_density,
     threshold_density,
+    truncate_distance_grid,
 )
 
 __all__ = [
     "ConversionMetadata",
+    "FieldSamples",
     "Modality",
     "SDFSamples",
+    "SparseVoxels",
     "TopologySample",
     "TrainingCache",
     "cache_summary",
@@ -50,18 +75,24 @@ __all__ = [
     "convert_file",
     "density_to_mesh",
     "density_to_training_cache",
+    "dense_to_sparse",
     "export_mesh",
     "export_pointcloud",
+    "field_samples_summary",
     "load_mesh_as_pointcloud",
     "load_mesh",
+    "load_field_samples",
     "load_pointcloud",
     "load_sdf_samples",
     "load_selto_dataset",
+    "load_sparse_voxels",
     "load_selto_sample",
     "load_training_cache",
     "load_volume",
     "infer_modality",
     "make_sdf_samples",
+    "make_field_samples",
+    "make_sparse_voxels",
     "mesh_to_pointcloud",
     "pointcloud_summary",
     "pointcloud_to_distance_grid",
@@ -69,6 +100,8 @@ __all__ = [
     "read_metadata",
     "repair_mesh",
     "save_sdf_samples",
+    "save_field_samples",
+    "save_sparse_voxels",
     "save_signed_distance",
     "save_training_cache",
     "save_volume",
@@ -77,6 +110,9 @@ __all__ = [
     "save_volume_vtk",
     "sdf_samples_summary",
     "signed_distance_from_density",
+    "sparse_to_dense",
+    "sparse_voxels_summary",
     "threshold_density",
+    "truncate_distance_grid",
     "write_metadata",
 ]
