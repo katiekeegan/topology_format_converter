@@ -2,22 +2,27 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Sequence
 
 import numpy as np
 
 from .metadata import ConversionMetadata, metadata_sidecar_path, write_metadata
-from .volume import as_3d_array
+from .volume import as_3d_array, to_numpy
 
 
 @dataclass
 class SparseVoxels:
-    """Sparse COO voxel representation with integer ijk indices and values."""
+    """Sparse COO voxel representation with integer ijk indices and values.
+
+    ``values`` is ``[N]`` for one value per voxel or ``[N, C]`` for a feature
+    vector per voxel, optionally named by ``channel_names``.
+    """
 
     indices: np.ndarray
     values: np.ndarray
     shape: tuple[int, int, int]
     metadata: Optional[ConversionMetadata] = None
+    channel_names: Optional[tuple[str, ...]] = None
 
 
 def _validate_shape(shape: Iterable[int]) -> tuple[int, int, int]:
@@ -42,12 +47,25 @@ def _validate_indices(indices: Any, shape: tuple[int, int, int]) -> np.ndarray:
 
 
 def _validate_values(values: Any, count: int) -> np.ndarray:
-    values_array = np.asarray(values, dtype=np.float32).reshape(-1)
+    values_array = np.asarray(values, dtype=np.float32)
+    if values_array.ndim == 2 and values_array.shape[0] == count:
+        return values_array
+    values_array = values_array.reshape(-1)
     if values_array.shape != (count,):
         raise ValueError(
-            f"values must have shape ({count},); got {values_array.shape}."
+            f"values must have shape ({count},) or ({count}, C); got {values_array.shape}."
         )
     return values_array
+
+
+def _validate_channel_names(names: Optional[Sequence[str]], values: np.ndarray) -> Optional[tuple[str, ...]]:
+    if names is None:
+        return None
+    names = tuple(str(name) for name in names)
+    count = values.shape[1] if values.ndim == 2 else 1
+    if len(names) != count:
+        raise ValueError(f"Expected {count} channel names; got {len(names)}.")
+    return names
 
 
 def make_sparse_voxels(
@@ -56,6 +74,7 @@ def make_sparse_voxels(
     *,
     shape: Iterable[int],
     metadata: Optional[ConversionMetadata] = None,
+    channel_names: Optional[Sequence[str]] = None,
 ) -> SparseVoxels:
     shape_values = _validate_shape(shape)
     indices_array = _validate_indices(indices, shape_values)
@@ -68,6 +87,7 @@ def make_sparse_voxels(
         values=values_array,
         shape=shape_values,
         metadata=metadata,
+        channel_names=_validate_channel_names(channel_names, values_array),
     )
 
 
@@ -86,8 +106,43 @@ def dense_to_sparse(volume: Any, *, threshold: Optional[float] = None) -> Sparse
     return make_sparse_voxels(indices, values, shape=array.shape)
 
 
+def dense_channels_to_sparse(
+    channels: Any,
+    *,
+    mask: Optional[Any] = None,
+    channel_names: Optional[Sequence[str]] = None,
+) -> SparseVoxels:
+    """Sparse voxels with a feature vector per active site from a ``[C, D, H, W]`` grid.
+
+    Active sites are the voxels inside ``mask``, or every voxel with a non-zero
+    value in any channel when no mask is given.
+    """
+
+    grid = np.asarray(to_numpy(channels), dtype=np.float32)
+    if grid.ndim == 3:
+        grid = grid[None]
+    if grid.ndim != 4:
+        raise ValueError(f"channels must have shape [C, D, H, W]; got {grid.shape}.")
+    if mask is None:
+        active = np.any(grid != 0, axis=0)
+    else:
+        active = np.asarray(to_numpy(mask)).squeeze().astype(bool)
+        if active.shape != grid.shape[1:]:
+            raise ValueError(f"mask shape {active.shape} does not match grid shape {grid.shape[1:]}.")
+    indices = np.argwhere(active).astype(np.int64, copy=False)
+    values = grid[:, indices[:, 0], indices[:, 1], indices[:, 2]].T
+    return make_sparse_voxels(indices, values, shape=grid.shape[1:], channel_names=channel_names)
+
+
 def sparse_to_dense(sparse: SparseVoxels, *, fill_value: float = 0.0) -> np.ndarray:
+    """Dense ``[D, H, W]`` grid, or ``[C, D, H, W]`` for multi-channel sparse voxels."""
+
     sparse = make_sparse_voxels(sparse.indices, sparse.values, shape=sparse.shape)
+    if sparse.values.ndim == 2:
+        dense = np.full((sparse.values.shape[1], *sparse.shape), float(fill_value), dtype=np.float32)
+        if len(sparse.indices):
+            dense[(slice(None), *sparse.indices.T)] = sparse.values.T
+        return dense
     dense = np.full(sparse.shape, float(fill_value), dtype=np.float32)
     if len(sparse.indices):
         dense[tuple(sparse.indices.T)] = sparse.values
@@ -133,7 +188,8 @@ def load_sparse_voxels(
                 f"Could not find sparse voxel shape in {path}. Available keys: {data.files}"
             )
         values = data[value_key] if value_key in data else None
-        return make_sparse_voxels(data[index_key], values, shape=data[actual_shape_key])
+        names = [str(name) for name in data["channel_names"]] if "channel_names" in data else None
+        return make_sparse_voxels(data[index_key], values, shape=data[actual_shape_key], channel_names=names)
 
 
 def save_sparse_voxels(
@@ -147,13 +203,17 @@ def save_sparse_voxels(
     if path.suffix.lower() != ".npz":
         raise ValueError("Sparse voxels can only be saved to .npz.")
     path.parent.mkdir(parents=True, exist_ok=True)
-    sparse = make_sparse_voxels(sparse.indices, sparse.values, shape=sparse.shape)
-    np.savez_compressed(
-        path,
-        indices=sparse.indices,
-        values=sparse.values,
-        shape=np.asarray(sparse.shape, dtype=np.int64),
+    sparse = make_sparse_voxels(
+        sparse.indices, sparse.values, shape=sparse.shape, channel_names=sparse.channel_names
     )
+    arrays: dict[str, Any] = {
+        "indices": sparse.indices,
+        "values": sparse.values,
+        "shape": np.asarray(sparse.shape, dtype=np.int64),
+    }
+    if sparse.channel_names is not None:
+        arrays["channel_names"] = np.asarray(sparse.channel_names)
+    np.savez_compressed(path, **arrays)
     sidecar_metadata = metadata or sparse.metadata
     if sidecar_metadata is not None and write_sidecar:
         write_metadata(sidecar_metadata, metadata_sidecar_path(path))

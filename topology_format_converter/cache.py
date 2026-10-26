@@ -84,6 +84,41 @@ def _sample_query_points(
     return np.clip(points, bounds_min, bounds_max).astype(np.float32, copy=False)
 
 
+def sample_query_points(
+    shape: Iterable[int],
+    num_points: int,
+    *,
+    near_points: Optional[Any] = None,
+    near_fraction: float = 0.5,
+    noise_std: float = 0.05,
+    coordinate_mode: str = "training",
+    spacing: Optional[Iterable[float]] = None,
+    seed: Optional[int] = None,
+) -> np.ndarray:
+    """Random query points in a grid's coordinate box, optionally concentrated near given points.
+
+    A ``near_fraction`` share of the points are ``near_points`` plus Gaussian
+    noise of ``noise_std`` (in the same coordinates); the rest are uniform in
+    the box. This is the sampler used for training caches, exposed for any
+    field (for example boundary-condition or load fields).
+    """
+
+    coordinate_mode = validate_coordinate_mode(coordinate_mode)
+    bounds_min, bounds_max = coordinate_bounds(
+        tuple(int(value) for value in shape), coordinate_mode=coordinate_mode, spacing=parse_spacing(spacing)
+    )
+    near = np.empty((0, 3), dtype=np.float32) if near_points is None else np.asarray(near_points, dtype=np.float32)
+    return _sample_query_points(
+        near,
+        bounds_min=bounds_min,
+        bounds_max=bounds_max,
+        num_query_points=int(num_points),
+        surface_sample_ratio=float(near_fraction) if len(near) else 0.0,
+        noise_std=float(noise_std),
+        seed=seed,
+    )
+
+
 def density_to_training_cache(
     density: Any,
     *,

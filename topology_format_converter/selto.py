@@ -25,6 +25,35 @@ class TopologySample:
     solution: Optional[Any] = None
 
 
+PROBLEM_CHANNEL_NAMES = (
+    "dirichlet_x", "dirichlet_y", "dirichlet_z", "design_space", "force_x", "force_y", "force_z",
+)
+
+
+def problem_channels(dirichlet: Any, design_space: Any, force: Any) -> np.ndarray:
+    """Stack a TO problem into DL4TO's 7-channel layout ``[Ω_dirichlet (3), Ω_design (1), F (3)]``.
+
+    This is the channel order of DL4TO's ``TrivialPreprocessing``; the names are
+    :data:`PROBLEM_CHANNEL_NAMES`. ``design_space`` uses DL4TO's convention:
+    -1 free to optimize, 0 fixed void, 1 fixed solid.
+    """
+
+    parts = [np.asarray(to_numpy(array), dtype=np.float32) for array in (dirichlet, design_space, force)]
+    parts = [part[None] if part.ndim == 3 else part for part in parts]
+    channels = np.concatenate(parts, axis=0)
+    if channels.ndim != 4 or channels.shape[0] != 7:
+        raise ValueError(f"Expected 3 + 1 + 3 channels of one 3-D grid; got {channels.shape}.")
+    return channels
+
+
+def selto_problem_channels(sample: "TopologySample") -> np.ndarray:
+    """The 7-channel problem grid of a SELTO/DL4TO sample (see :func:`problem_channels`)."""
+
+    if sample.dirichlet is None or sample.design_space is None or sample.force is None:
+        raise ValueError("The sample has no problem arrays (dirichlet, design_space, force).")
+    return problem_channels(sample.dirichlet, sample.design_space, sample.force)
+
+
 def _import_selto_dataset():
     try:
         from dl4to.datasets import SELTODataset

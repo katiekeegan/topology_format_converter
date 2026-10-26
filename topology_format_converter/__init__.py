@@ -1,16 +1,32 @@
 """Reusable conversion tools for topology optimization shape data.
 
 The package treats voxel density arrays as canonical volume data, then derives
-meshes, signed-distance grids, point clouds, and training caches. SELTO/DL4TO
-support is provided through dedicated dataset adapters.
+meshes, signed-distance grids, point clouds, and training caches. Multi-channel
+attributes (for example the loads and boundary conditions of a TO problem) can
+be carried onto sparse voxels, attributed points, graphs, and tetrahedral
+meshes. SELTO/DL4TO support is provided through dedicated dataset adapters.
 """
 
+from .attributes import (
+    AttributedPoints,
+    as_channel_grid,
+    attributed_points_summary,
+    gaussian_smooth_channels,
+    load_attributed_points,
+    make_attributed_points,
+    sample_grid_channels,
+    save_attributed_points,
+    scatter_grid_channels_to_points,
+    subsample_attributed_points,
+    voxels_to_attributed_points,
+)
 from .cache import (
     TrainingCache,
     cache_summary,
     cache_to_mesh,
     density_to_training_cache,
     load_training_cache,
+    sample_query_points,
     save_training_cache,
 )
 from .convert import Modality, convert_file, infer_modality
@@ -20,6 +36,15 @@ from .field import (
     load_field_samples,
     make_field_samples,
     save_field_samples,
+)
+from .graph import (
+    GraphSamples,
+    graph_samples_summary,
+    load_graph_samples,
+    make_graph_samples,
+    points_to_knn_graph,
+    save_graph_samples,
+    sparse_voxels_to_graph,
 )
 from .mesh import convert_mesh, density_to_mesh, export_mesh, load_mesh, repair_mesh
 from .metadata import ConversionMetadata, read_metadata, write_metadata
@@ -32,7 +57,14 @@ from .pointcloud import (
     pointcloud_to_distance_grid,
     pointcloud_to_occupancy,
 )
-from .selto import TopologySample, load_selto_dataset, load_selto_sample
+from .selto import (
+    PROBLEM_CHANNEL_NAMES,
+    TopologySample,
+    load_selto_dataset,
+    load_selto_sample,
+    problem_channels,
+    selto_problem_channels,
+)
 from .sdf import (
     SDFSamples,
     load_sdf_samples,
@@ -42,12 +74,26 @@ from .sdf import (
 )
 from .sparse import (
     SparseVoxels,
+    dense_channels_to_sparse,
     dense_to_sparse,
     load_sparse_voxels,
     make_sparse_voxels,
     save_sparse_voxels,
     sparse_to_dense,
     sparse_voxels_summary,
+)
+from .tetmesh import (
+    TetMesh,
+    density_to_tet_mesh,
+    load_tet_mesh,
+    locate_points_in_tet_mesh,
+    make_tet_mesh,
+    save_tet_mesh,
+    tet_mesh_boundary_faces,
+    tet_mesh_edges,
+    tet_mesh_summary,
+    tet_mesh_to_surface_mesh,
+    tet_mesh_volumes,
 )
 from .volume import (
     load_volume,
@@ -62,6 +108,40 @@ from .volume import (
 )
 
 __all__ = [
+    "AttributedPoints",
+    "GraphSamples",
+    "PROBLEM_CHANNEL_NAMES",
+    "TetMesh",
+    "as_channel_grid",
+    "attributed_points_summary",
+    "dense_channels_to_sparse",
+    "density_to_tet_mesh",
+    "gaussian_smooth_channels",
+    "graph_samples_summary",
+    "load_attributed_points",
+    "load_graph_samples",
+    "load_tet_mesh",
+    "locate_points_in_tet_mesh",
+    "make_attributed_points",
+    "make_graph_samples",
+    "make_tet_mesh",
+    "points_to_knn_graph",
+    "problem_channels",
+    "sample_grid_channels",
+    "sample_query_points",
+    "save_attributed_points",
+    "save_graph_samples",
+    "save_tet_mesh",
+    "scatter_grid_channels_to_points",
+    "selto_problem_channels",
+    "sparse_voxels_to_graph",
+    "subsample_attributed_points",
+    "tet_mesh_boundary_faces",
+    "tet_mesh_edges",
+    "tet_mesh_summary",
+    "tet_mesh_to_surface_mesh",
+    "tet_mesh_volumes",
+    "voxels_to_attributed_points",
     "ConversionMetadata",
     "FieldSamples",
     "Modality",

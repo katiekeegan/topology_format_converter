@@ -59,10 +59,19 @@ udf-grid        dense 3-D unsigned distance field
 tsdf-grid       dense 3-D truncated signed-distance field
 sdf-samples     point samples with SDF values, e.g. query_points/query_sdf
 field-samples   point samples with arbitrary scalar values, e.g. stress/density
-sparse-voxels   COO-style voxel data with indices, values, and shape arrays
+sparse-voxels   COO-style voxel data with indices, values ([N] or [N, C]), and shape arrays
 mesh            OBJ/STL/PLY/OFF/GLB/GLTF mesh
 pointcloud      surface points with optional normals
 training-cache  .npz bundle with density, SDF grid, surface points, query points
+```
+
+Python-API modalities for multi-channel data, such as the loads, boundary
+conditions, and design domain of a TO problem (`.npz` with `channel_names`):
+
+```text
+attributed-points  points with a named feature vector each (points, features)
+graph              positioned nodes with features plus directed edges (points, features, edges)
+tet-mesh           volumetric tetrahedral mesh (vertices, tetrahedra)
 ```
 
 ## Supported Conversions
@@ -336,6 +345,49 @@ convert_file(
     input_key="density",
 )
 ```
+
+### Multi-channel problem encodings
+
+A TO problem is a multi-channel grid: in DL4TO's layout, three Dirichlet
+(support) channels, the design-space flag, and three force channels. These
+helpers carry all channels onto other representations; lossless ones keep one
+element per voxel, and point loads are moved with a conservative scatter rather
+than interpolation so total forces are preserved.
+
+```python
+from topology_format_converter import (
+    PROBLEM_CHANNEL_NAMES,
+    dense_channels_to_sparse,
+    density_to_tet_mesh,
+    locate_points_in_tet_mesh,
+    problem_channels,
+    sample_grid_channels,
+    sample_query_points,
+    scatter_grid_channels_to_points,
+    sparse_voxels_to_graph,
+    voxels_to_attributed_points,
+)
+
+channels = problem_channels(dirichlet, design_space, force)    # [7, D, H, W]
+domain = channels[3] != 0                                      # admissible design domain
+
+sparse = dense_channels_to_sparse(channels, mask=domain, channel_names=PROBLEM_CHANNEL_NAMES)
+points = voxels_to_attributed_points(channels, domain)        # one point per domain voxel
+graph = sparse_voxels_to_graph(sparse, connectivity=26)       # lattice neighbours as edges
+
+loads = np.argwhere(np.any(channels[4:] != 0, axis=0))
+mesh = density_to_tet_mesh(domain.astype(float), interior_spacing=2, extra_points=loads)
+vertex_loads = scatter_grid_channels_to_points(channels[4:], mesh.vertices)   # totals conserved
+vertex_design = sample_grid_channels(channels[3:4], mesh.vertices, order=0)   # nearest voxel
+
+tet, weights, inside = locate_points_in_tet_mesh(mesh, query_points)          # barycentric lookup
+queries = sample_query_points(channels.shape[1:], 4096, near_points=loads_in_training_coords)
+```
+
+`density_to_tet_mesh` tetrahedralizes (SciPy Delaunay) the marching-cubes
+surface vertices, an interior voxel lattice, and any extra points such as load
+locations, and keeps the tetrahedra inside the region. It fills the region's
+volume, but its boundary surface is not guaranteed to be watertight.
 
 ## Coordinate Modes
 
