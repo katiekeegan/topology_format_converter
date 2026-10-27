@@ -181,6 +181,7 @@ def test_surface_formats_convert_back_to_solid_occupancy():
         return (a.astype(bool) & b.astype(bool)).sum() / (a.astype(bool) | b.astype(bool)).sum()
 
     assert iou(mesh_to_occupancy(mesh, shape=density.shape), density) > 0.95
+    assert iou(mesh_to_occupancy(mesh, shape=density.shape, method="winding"), density) > 0.95
     assert iou(oriented_pointcloud_to_occupancy(points, normals, shape=density.shape), density) > 0.9
 
 
@@ -192,3 +193,15 @@ def test_close_boundary_caps_solid_touching_the_grid_edge():
     assert not open_mesh.is_watertight and closed.is_watertight
     assert closed.vertices.min() >= -0.5 and closed.vertices[:, 2].max() <= 2.5
     assert closed.volume > 0
+
+
+def test_parity_and_winding_occupancy_agree_on_a_topology_with_holes():
+    density = np.zeros((20, 20, 6), dtype=np.float32)
+    density[2:18, 2:18, 1:5] = 1.0
+    density[6:9, 6:9, :] = 0.0
+    density[11:14, 10:15, :] = 0.0
+    mesh = density_to_mesh(density, coordinate_mode="training", close_boundary=True)
+    parity = mesh_to_occupancy(mesh, shape=density.shape)
+    winding = mesh_to_occupancy(mesh, shape=density.shape, method="winding")
+    np.testing.assert_array_equal(parity, winding)
+    np.testing.assert_array_equal(parity, density)

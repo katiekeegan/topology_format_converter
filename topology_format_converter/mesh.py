@@ -81,7 +81,7 @@ def density_to_mesh(
     return mesh
 
 
-def winding_numbers(mesh: trimesh.Trimesh, points: Any, *, chunk: int = 2048) -> np.ndarray:
+def winding_numbers(mesh: trimesh.Trimesh, points: Any, *, chunk: int = 256) -> np.ndarray:
     """Generalized winding number of a triangle mesh at each point (about 1 inside, 0 outside).
 
     Robust to small holes and inconsistent closure, unlike ray-casting containment.
@@ -101,21 +101,58 @@ def winding_numbers(mesh: trimesh.Trimesh, points: Any, *, chunk: int = 2048) ->
     return values
 
 
+def _ray_parity_occupancy(vertices: np.ndarray, faces: np.ndarray, columns: np.ndarray, heights: np.ndarray,
+                          chunk: int = 128) -> np.ndarray:
+    """Inside test by crossing parity along +z: ``columns`` are (x, y) ray origins, ``heights`` the z values tested."""
+
+    triangles = vertices[faces].astype(np.float64)
+    origin, edge1, edge2 = triangles[:, 0], triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+    determinant = edge1[:, 0] * edge2[:, 1] - edge1[:, 1] * edge2[:, 0]
+    usable = np.abs(determinant) > 1e-14  # triangles seen edge-on from the ray direction never count
+    origin, edge1, edge2, determinant = origin[usable], edge1[usable], edge2[usable], determinant[usable]
+    inside = np.zeros((len(columns), len(heights)), dtype=bool)
+    for start in range(0, len(columns), chunk):
+        q = columns[start : start + chunk, None, :] - origin[None, :, :2]
+        u = (q[..., 0] * edge2[:, 1] - q[..., 1] * edge2[:, 0]) / determinant
+        v = (edge1[:, 0] * q[..., 1] - edge1[:, 1] * q[..., 0]) / determinant
+        hit = (u >= 0) & (v >= 0) & (u + v <= 1)
+        z = origin[:, 2] + u * edge1[:, 2] + v * edge2[:, 2]
+        crossings = (hit[..., None] & (z[..., None] > heights[None, None, :])).sum(axis=1)
+        inside[start : start + chunk] = crossings % 2 == 1
+    return inside
+
+
 def mesh_to_occupancy(
     mesh: trimesh.Trimesh,
     *,
     shape: Iterable[int],
     coordinate_mode: str = "training",
     spacing: Optional[Iterable[float]] = None,
+    method: str = "parity",
 ) -> np.ndarray:
-    """Solid occupancy of a closed (or nearly closed) mesh at voxel centres, by winding number >= 0.5."""
+    """Solid occupancy of a mesh at voxel centres.
+
+    ``method="parity"`` (default) counts ray crossings along z from each voxel
+    centre; it is exact and fast for closed meshes. ``method="winding"`` uses the
+    generalized winding number (>= 0.5 inside), which tolerates holes but costs
+    O(voxels x faces).
+    """
 
     shape_values = tuple(int(value) for value in shape)
     centres = voxel_indices_to_coords(
         np.argwhere(np.ones(shape_values, dtype=bool)).astype(np.float32), shape_values,
         coordinate_mode=coordinate_mode, spacing=spacing,
     )
-    return (winding_numbers(mesh, centres) >= 0.5).astype(np.float32).reshape(shape_values)
+    if method == "winding":
+        return (winding_numbers(mesh, centres) >= 0.5).astype(np.float32).reshape(shape_values)
+    if method != "parity":
+        raise ValueError(f"method must be 'parity' or 'winding'; got {method!r}.")
+    grid = centres.reshape(*shape_values, 3)
+    # Nudge rays off exact vertex/edge alignment (voxel centres often coincide with grid-aligned mesh features).
+    columns = grid[:, :, 0, :2].reshape(-1, 2).astype(np.float64) + np.array([1.234e-5, 2.345e-5])
+    heights = grid[0, 0, :, 2].astype(np.float64)
+    inside = _ray_parity_occupancy(np.asarray(mesh.vertices), np.asarray(mesh.faces), columns, heights)
+    return inside.reshape(shape_values).astype(np.float32)
 
 
 def load_mesh(path: str | Path) -> trimesh.Trimesh:
