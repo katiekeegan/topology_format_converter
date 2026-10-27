@@ -131,6 +131,7 @@ def density_to_training_cache(
     noise_std: float = 0.05,
     normalize_sdf: bool = True,
     seed: Optional[int] = None,
+    close_boundary: bool = False,
     source_format: str = "volume",
     source_path: Optional[str] = None,
     metadata_extra: Optional[dict[str, Any]] = None,
@@ -146,6 +147,7 @@ def density_to_training_cache(
         coordinate_mode=coordinate_mode,
         spacing=spacing_values,
         repair=True,
+        close_boundary=close_boundary,
     )
     sdf_grid = signed_distance_from_density(density_array, threshold=threshold, spacing=spacing_values)
     scale = sdf_normalization_scale(density_array.shape, spacing=spacing_values)

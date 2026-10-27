@@ -42,10 +42,17 @@ def density_to_mesh(
     coordinate_mode: str = "voxel",
     spacing: Optional[Iterable[float]] = None,
     repair: bool = True,
+    close_boundary: bool = False,
 ) -> trimesh.Trimesh:
-    """Convert a 3-D density volume to a surface mesh with marching cubes."""
+    """Convert a 3-D density volume to a surface mesh with marching cubes.
+
+    With ``close_boundary``, the grid is padded by one empty voxel first, so
+    solid that touches the grid boundary is capped and the mesh is closed;
+    vertices keep the unpadded grid's coordinates.
+    """
 
     density_array = as_3d_array(density, name="density")
+    original_shape = density_array.shape
     coordinate_mode = validate_coordinate_mode(coordinate_mode)
     threshold = float(threshold)
     if not (density_array.min() <= threshold <= density_array.max()):
@@ -57,9 +64,13 @@ def density_to_mesh(
         raise ValueError("Cannot build a mesh from a constant density volume.")
 
     mc_spacing = parse_spacing(spacing) or (1.0, 1.0, 1.0)
+    if close_boundary:
+        density_array = np.pad(density_array, 1, constant_values=min(float(density_array.min()), 0.0))
     verts, faces, _, _ = measure.marching_cubes(density_array, level=threshold, spacing=mc_spacing)
+    if close_boundary:
+        verts = verts - np.asarray(mc_spacing, dtype=verts.dtype)
     if coordinate_mode != "voxel":
-        verts = voxel_indices_to_coords(verts, density_array.shape, coordinate_mode=coordinate_mode)
+        verts = voxel_indices_to_coords(verts, original_shape, coordinate_mode=coordinate_mode)
 
     mesh = trimesh.Trimesh(vertices=verts.astype(np.float32), faces=faces.astype(np.int64), process=False)
     mesh = repair_mesh(mesh) if repair else mesh

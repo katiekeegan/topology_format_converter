@@ -182,3 +182,13 @@ def test_surface_formats_convert_back_to_solid_occupancy():
 
     assert iou(mesh_to_occupancy(mesh, shape=density.shape), density) > 0.95
     assert iou(oriented_pointcloud_to_occupancy(points, normals, shape=density.shape), density) > 0.9
+
+
+def test_close_boundary_caps_solid_touching_the_grid_edge():
+    density = np.zeros((10, 10, 3), dtype=np.float32)
+    density[2:8, 2:8, :] = 1.0  # touches the top and bottom faces
+    open_mesh = density_to_mesh(density)
+    closed = density_to_mesh(density, close_boundary=True)
+    assert not open_mesh.is_watertight and closed.is_watertight
+    assert closed.vertices.min() >= -0.5 and closed.vertices[:, 2].max() <= 2.5
+    assert closed.volume > 0
