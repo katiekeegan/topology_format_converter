@@ -220,6 +220,33 @@ def pointcloud_to_occupancy(
     return occupancy
 
 
+def oriented_pointcloud_to_occupancy(
+    points: Any,
+    normals: Any,
+    *,
+    shape: Iterable[int],
+    coordinate_mode: str = "training",
+    spacing: Optional[Iterable[float]] = None,
+) -> np.ndarray:
+    """Solid occupancy from an oriented surface point cloud (outward normals).
+
+    A voxel centre is inside when it lies behind its nearest surface point, i.e.
+    ``(centre - point) · normal < 0``. Unlike :func:`pointcloud_to_occupancy`,
+    which marks only the voxels the points fall in, this fills the interior.
+    """
+
+    points_array = _validate_points(points)
+    normals_array = _validate_normals(normals, points_array.shape)
+    shape_values = tuple(int(value) for value in shape)
+    centres = voxel_indices_to_coords(
+        np.argwhere(np.ones(shape_values, dtype=bool)).astype(np.float32), shape_values,
+        coordinate_mode=coordinate_mode, spacing=spacing,
+    )
+    _, nearest = cKDTree(points_array).query(centres)
+    signed = np.einsum("ij,ij->i", centres - points_array[nearest], normals_array[nearest])
+    return (signed < 0).astype(np.float32).reshape(shape_values)
+
+
 def pointcloud_to_distance_grid(
     points: Any,
     *,

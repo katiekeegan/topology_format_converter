@@ -62,7 +62,49 @@ def density_to_mesh(
         verts = voxel_indices_to_coords(verts, density_array.shape, coordinate_mode=coordinate_mode)
 
     mesh = trimesh.Trimesh(vertices=verts.astype(np.float32), faces=faces.astype(np.int64), process=False)
-    return repair_mesh(mesh) if repair else mesh
+    mesh = repair_mesh(mesh) if repair else mesh
+    # marching_cubes winds faces so that normals point towards decreasing density, i.e. into
+    # the solid; flip them so face normals (and sampled point normals) point outward.
+    if mesh.volume < 0:
+        mesh.invert()
+    return mesh
+
+
+def winding_numbers(mesh: trimesh.Trimesh, points: Any, *, chunk: int = 2048) -> np.ndarray:
+    """Generalized winding number of a triangle mesh at each point (about 1 inside, 0 outside).
+
+    Robust to small holes and inconsistent closure, unlike ray-casting containment.
+    """
+
+    triangles = np.asarray(mesh.vertices, dtype=np.float64)[np.asarray(mesh.faces)]
+    queries = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    values = np.empty(len(queries))
+    for start in range(0, len(queries), chunk):
+        rel = triangles[None] - queries[start : start + chunk, None, None, :]
+        a, b, c = rel[:, :, 0], rel[:, :, 1], rel[:, :, 2]
+        la, lb, lc = (np.linalg.norm(v, axis=-1) for v in (a, b, c))
+        numerator = np.einsum("nfi,nfi->nf", a, np.cross(b, c))
+        denominator = la * lb * lc + np.einsum("nfi,nfi->nf", a, b) * lc + np.einsum("nfi,nfi->nf", b, c) * la \
+            + np.einsum("nfi,nfi->nf", c, a) * lb
+        values[start : start + chunk] = np.arctan2(numerator, denominator).sum(axis=1) / (2.0 * np.pi)
+    return values
+
+
+def mesh_to_occupancy(
+    mesh: trimesh.Trimesh,
+    *,
+    shape: Iterable[int],
+    coordinate_mode: str = "training",
+    spacing: Optional[Iterable[float]] = None,
+) -> np.ndarray:
+    """Solid occupancy of a closed (or nearly closed) mesh at voxel centres, by winding number >= 0.5."""
+
+    shape_values = tuple(int(value) for value in shape)
+    centres = voxel_indices_to_coords(
+        np.argwhere(np.ones(shape_values, dtype=bool)).astype(np.float32), shape_values,
+        coordinate_mode=coordinate_mode, spacing=spacing,
+    )
+    return (winding_numbers(mesh, centres) >= 0.5).astype(np.float32).reshape(shape_values)
 
 
 def load_mesh(path: str | Path) -> trimesh.Trimesh:

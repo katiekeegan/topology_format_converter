@@ -2,6 +2,9 @@ import numpy as np
 import pytest
 
 from topology_format_converter import (
+    mesh_to_occupancy,
+    mesh_to_pointcloud,
+    oriented_pointcloud_to_occupancy,
     PROBLEM_CHANNEL_NAMES,
     dense_channels_to_sparse,
     density_to_mesh,
@@ -153,3 +156,29 @@ def test_gaussian_smooth_spreads_point_loads():
     grid[0, 7, 7, 7] = 1.0
     smooth = gaussian_smooth_channels(grid, sigma=1.5)
     assert abs(smooth.sum() - 1.0) < 1e-4 and smooth[0, 7, 7, 8] > 0
+
+
+def test_training_bounds_follow_the_grid_extent():
+    from topology_format_converter.volume import coordinate_bounds, voxel_indices_to_coords
+
+    low, high = coordinate_bounds((39, 39, 4), coordinate_mode="training")
+    corner = voxel_indices_to_coords(np.array([[38.0, 38.0, 3.0]]), (39, 39, 4), coordinate_mode="training")[0]
+    np.testing.assert_allclose(low, -1.0)
+    np.testing.assert_allclose(high, corner, rtol=1e-6)
+    points = sample_query_points((39, 39, 4), 2000, coordinate_mode="training", seed=0)
+    assert np.all(points[:, 2] <= high[2] + 1e-6)
+
+
+def test_surface_formats_convert_back_to_solid_occupancy():
+    density = np.zeros((16, 16, 16), dtype=np.float32)
+    i, j, k = np.meshgrid(*(np.arange(16),) * 3, indexing="ij")
+    density[(i - 7.5) ** 2 + (j - 7.5) ** 2 + (k - 7.5) ** 2 <= 25] = 1.0
+    mesh = density_to_mesh(density, coordinate_mode="training")
+    assert mesh.volume > 0  # outward-facing normals
+    points, normals = mesh_to_pointcloud(mesh, num_points=4000, seed=0)
+
+    def iou(a, b):
+        return (a.astype(bool) & b.astype(bool)).sum() / (a.astype(bool) | b.astype(bool)).sum()
+
+    assert iou(mesh_to_occupancy(mesh, shape=density.shape), density) > 0.95
+    assert iou(oriented_pointcloud_to_occupancy(points, normals, shape=density.shape), density) > 0.9

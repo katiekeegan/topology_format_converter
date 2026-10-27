@@ -46,13 +46,14 @@ from .graph import (
     save_graph_samples,
     sparse_voxels_to_graph,
 )
-from .mesh import convert_mesh, density_to_mesh, export_mesh, load_mesh, repair_mesh
+from .mesh import convert_mesh, density_to_mesh, export_mesh, load_mesh, mesh_to_occupancy, repair_mesh, winding_numbers
 from .metadata import ConversionMetadata, read_metadata, write_metadata
 from .pointcloud import (
     export_pointcloud,
     load_mesh_as_pointcloud,
     load_pointcloud,
     mesh_to_pointcloud,
+    oriented_pointcloud_to_occupancy,
     pointcloud_summary,
     pointcloud_to_distance_grid,
     pointcloud_to_occupancy,
@@ -142,6 +143,9 @@ __all__ = [
     "tet_mesh_to_surface_mesh",
     "tet_mesh_volumes",
     "voxels_to_attributed_points",
+    "mesh_to_occupancy",
+    "oriented_pointcloud_to_occupancy",
+    "winding_numbers",
     "ConversionMetadata",
     "FieldSamples",
     "Modality",

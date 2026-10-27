@@ -383,7 +383,12 @@ def coordinate_bounds(
 
     if coordinate_mode == "voxel":
         return np.zeros(3, dtype=np.float32), (shape_array - 1.0) * spacing_values
-    return -np.ones(3, dtype=np.float32), np.ones(3, dtype=np.float32)
+    if coordinate_mode == "unit-box":
+        return -np.ones(3, dtype=np.float32), np.ones(3, dtype=np.float32)
+    # "training" scales every axis by the longest one, so shorter axes span less than [-1, 1]:
+    # the voxel centres run from -1 to (shape - 1) / scale - 1 on each axis.
+    scale = float(shape_array.max() / 2.0)
+    return -np.ones(3, dtype=np.float32), ((shape_array - 1.0) / scale - 1.0).astype(np.float32)
 
 
 def sample_sdf_grid(
