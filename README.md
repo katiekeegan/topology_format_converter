@@ -361,6 +361,7 @@ from topology_format_converter import (
     density_to_tet_mesh,
     locate_points_in_tet_mesh,
     problem_channels,
+    rasterize_attributed_points,
     sample_grid_channels,
     sample_query_points,
     scatter_grid_channels_to_points,
@@ -382,6 +383,7 @@ vertex_design = sample_grid_channels(channels[3:4], mesh.vertices, order=0)   # 
 
 tet, weights, inside = locate_points_in_tet_mesh(mesh, query_points)          # barycentric lookup
 queries = sample_query_points(channels.shape[1:], 4096, near_points=loads_in_training_coords)
+grid_view = rasterize_attributed_points(points.points, points.features, shape=domain.shape)  # [1 + C, D, H, W]: count, means
 ```
 
 `density_to_tet_mesh` tetrahedralizes (SciPy Delaunay) the marching-cubes

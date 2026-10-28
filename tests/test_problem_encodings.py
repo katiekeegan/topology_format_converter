@@ -18,6 +18,7 @@ from topology_format_converter import (
     make_attributed_points,
     points_to_knn_graph,
     problem_channels,
+    rasterize_attributed_points,
     sample_grid_channels,
     sample_query_points,
     save_attributed_points,
@@ -76,6 +77,26 @@ def test_voxels_to_attributed_points_is_lossless(tmp_path):
     np.testing.assert_array_equal(sample_grid_channels(channels, samples.points, order=0), samples.features)
     loaded = load_attributed_points(save_attributed_points(samples, tmp_path / "points.npz"))
     assert loaded.channel_names == PROBLEM_CHANNEL_NAMES
+
+
+def test_rasterize_attributed_points_counts_and_averages():
+    points = np.array([[1.0, 2.0, 0.0], [1.2, 1.9, 0.1], [3.0, 0.0, 1.0], [9.0, 9.0, 9.0]], dtype=np.float32)
+    features = np.array([[1.0, 0.0], [3.0, 2.0], [5.0, -1.0], [7.0, 7.0]], dtype=np.float32)
+    grid = rasterize_attributed_points(points, features, shape=(4, 3, 2))
+    assert grid.shape == (3, 4, 3, 2)
+    assert grid[0].sum() == 3  # the last point lies outside the grid
+    assert grid[0, 1, 2, 0] == 2 and grid[0, 3, 0, 1] == 1
+    np.testing.assert_allclose(grid[1:, 1, 2, 0], [2.0, 1.0])
+    np.testing.assert_allclose(grid[1:, 3, 0, 1], [5.0, -1.0])
+    assert rasterize_attributed_points(points, shape=(4, 3, 2)).shape == (1, 4, 3, 2)
+
+
+def test_rasterized_voxel_centres_recover_the_grid():
+    channels, disc = disc_problem()
+    samples = voxels_to_attributed_points(channels, np.ones_like(disc), coordinate_mode="training")
+    grid = rasterize_attributed_points(samples.points, samples.features, shape=disc.shape, coordinate_mode="training")
+    np.testing.assert_array_equal(grid[0], 1.0)
+    np.testing.assert_allclose(grid[1:], channels)
 
 
 def test_scatter_conserves_loads_and_targets_nearest_point():

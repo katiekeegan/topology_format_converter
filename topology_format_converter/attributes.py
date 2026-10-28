@@ -129,6 +129,51 @@ def scatter_grid_channels_to_points(
     return result
 
 
+def rasterize_attributed_points(
+    points: Any,
+    features: Optional[Any] = None,
+    *,
+    shape: Iterable[int],
+    coordinate_mode: str = "voxel",
+    spacing: Optional[Iterable[float]] = None,
+) -> np.ndarray:
+    """Bin points into the voxels of a grid; returns ``[1 + C, D, H, W]``.
+
+    Channel 0 counts the points in each voxel, and channels 1..C hold the mean
+    of each feature over those points (0 in empty voxels). This is the grid view
+    of a point set, for reading point clouds, mesh vertices or field samples
+    with a grid model. Points outside the grid are dropped.
+    """
+
+    points_array = np.asarray(points, dtype=np.float32)
+    if points_array.ndim != 2 or points_array.shape[1] != 3:
+        raise ValueError(f"points must have shape [N, 3]; got {points_array.shape}.")
+    if features is None:
+        features_array = np.zeros((len(points_array), 0), dtype=np.float32)
+    else:
+        features_array = np.asarray(features, dtype=np.float32)
+        if features_array.ndim == 1:
+            features_array = features_array[:, None]
+        if features_array.ndim != 2 or features_array.shape[0] != len(points_array):
+            raise ValueError(f"features must have shape [{len(points_array)}, C]; got {features_array.shape}.")
+    shape_values = tuple(int(value) for value in shape)
+    if len(shape_values) != 3 or any(value <= 0 for value in shape_values):
+        raise ValueError(f"shape must contain three positive integers; got {shape_values}.")
+    indices = np.rint(
+        coords_to_voxel_indices(points_array, shape_values, coordinate_mode=coordinate_mode, spacing=spacing)
+    ).astype(np.int64)
+    valid = np.all((indices >= 0) & (indices < np.asarray(shape_values)), axis=1)
+    flat = np.ravel_multi_index(tuple(indices[valid].T), shape_values)
+    size = int(np.prod(shape_values))
+    counts = np.bincount(flat, minlength=size).astype(np.float32)
+    grid = np.zeros((1 + features_array.shape[1], size), dtype=np.float32)
+    grid[0] = counts
+    for channel in range(features_array.shape[1]):
+        sums = np.bincount(flat, weights=features_array[valid, channel], minlength=size)
+        grid[1 + channel] = np.divide(sums, counts, out=np.zeros(size), where=counts > 0)
+    return grid.reshape(1 + features_array.shape[1], *shape_values)
+
+
 def voxels_to_attributed_points(
     channels: Any,
     mask: Any,
